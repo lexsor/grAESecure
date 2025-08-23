@@ -13,7 +13,7 @@ Features:
 - Built-in self-tests for correctness
 
 ## StatStatus
-- ✅ Compiles and passes self-tests (aes_test.src)
+- ✅ Compiles and passes self-tests (grAESecure_test.src)
 - ⚠️ KDF and MAC are minimal (see Roadmap)
 
 ## Docs
