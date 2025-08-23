@@ -53,6 +53,17 @@ AESLIB.BYTES.bytes_to_str = function(b)
     return s
 end function
 
+// Random bytes (uses rnd)
+AESLIB.BYTES.random_bytes = function(n)
+    out = []
+    i = 0
+    while i < n
+        // rnd in [0,1); scale to [0,255]
+        out.push( floor(rnd * 256) )
+        i = i + 1
+    end while
+    return out
+end function
 
 // printable hex (for storing/printing ciphertext safely)
 _hexmap = "0123456789abcdef"
@@ -112,6 +123,196 @@ AESLIB.BYTES.key32_from_password = function(password)
         prev = h
     end while
     return key
+end function
+
+// -------------------- HASH helpers --------------------
+AESLIB.HASH = {}
+
+AESLIB.HASH.md5_bytes = function(data_bytes)
+    s = AESLIB.BYTES.bytes_to_str(data_bytes)
+    hhex = md5(s)                     // built-in returns hex string
+    return AESLIB.BYTES.from_hex(hhex) // -> 16 bytes
+end function
+
+// MD5 block size in bytes (same as SHA-256 would be)
+AESLIB.HASH.block_size = 64
+
+// HMAC over arbitrary hash: hash_fn(bytes[]) -> bytes[]
+// block_size in bytes (MD5 = 64)
+AESLIB.BYTES.hmac = function(hash_fn, block_size, key, msg)
+    // copy key
+    k = []
+    i = 0
+    while i < len(key)
+        k.push(key[i])
+        i = i + 1
+    end while
+
+    // if key longer than block: hash it
+    if len(k) > block_size then
+        k = hash_fn(k)
+    end if
+
+    // right-pad key with zeros
+    i = len(k)
+    while i < block_size
+        k.push(0)
+        i = i + 1
+    end while
+
+    // pads: 0x36=54, 0x5c=92
+    ipad = []
+    opad = []
+    i = 0
+    while i < block_size
+        ipad.push(54)
+        opad.push(92)
+        i = i + 1
+    end while
+
+    // xor pads with key
+    i = 0
+    while i < block_size
+        ipad[i] = ipad[i] ^ k[i]
+        opad[i]  = opad[i]  ^ k[i]
+        i = i + 1
+    end while
+
+    // inner = H(ipad || msg)
+    inner = []
+    i = 0
+    while i < block_size
+        inner.push(ipad[i])
+        i = i + 1
+    end while
+    i = 0
+    while i < len(msg)
+        inner.push(msg[i])
+        i = i + 1
+    end while
+    ih = hash_fn(inner)
+
+    // outer = H(opad || ih)
+    outer = []
+    i = 0
+    while i < block_size
+        outer.push(opad[i])
+        i = i + 1
+    end while
+    i = 0
+    while i < len(ih)
+        outer.push(ih[i])
+        i = i + 1
+    end while
+
+    return hash_fn(outer)
+end function
+
+// -------------------- PATHS --------------------
+AESLIB.PATHS = {}
+AESLIB.PATHS.base         = "/opt/crypto"
+AESLIB.PATHS.mac_key_name = "grAESecure_mac.key"
+AESLIB.PATHS.mac_key_path = AESLIB.PATHS.base + "/" + AESLIB.PATHS.mac_key_name
+AESLIB.PATHS.mac_key_backup = AESLIB.PATHS.base + "/grAESecure_mac.key.bak"
+
+// -------------------- KEYS: load-or-create MAC key --------------------
+AESLIB.KEYS = {}
+
+AESLIB.KEYS.load_or_create_mac_key = function()
+    comp = get_shell.host_computer
+
+    // If any check fails, touch() will create directories (recursively) and the file.
+    need_touch = 0
+
+    if comp.is_folder("/opt") == 0 then
+        need_touch = 1
+    else
+        if comp.is_folder(AESLIB.PATHS.base) == 0 then
+            need_touch = 1
+        else
+            f = comp.File(AESLIB.PATHS.mac_key_path)
+            if not f then
+                need_touch = 1
+            end if
+        end if
+    end if
+
+    if need_touch == 1 then
+        rc = comp.touch(AESLIB.PATHS.base, AESLIB.PATHS.mac_key_name)  // 1 on success or error string
+        // even if rc is an error string, we'll still try to write below via File()
+    end if
+
+    // Try to read existing key; if valid (32B), return it
+    f = comp.File(AESLIB.PATHS.mac_key_path)
+    if f then
+        hex = f.read()
+        b = AESLIB.BYTES.from_hex(hex)
+        if b != null and len(b) == 32 then
+            return b
+        end if
+        // fall through to regenerate if malformed
+    end if
+
+    // Generate and persist a fresh 32-byte key (hex)
+    key = AESLIB.BYTES.random_bytes(32)
+    hex = AESLIB.BYTES.to_hex(key)
+
+    nf = comp.File(AESLIB.PATHS.mac_key_path)
+    if nf then
+        nf.write(hex)
+    end if
+
+    return key
+end function
+
+// -------------------- KEYS: rotate MAC key (with optional backup) --------------------
+AESLIB.KEYS.rotate_mac_key = function(backup_opt)
+    comp = get_shell.host_computer
+
+    // If anything is missing, touch() will create dirs + file.
+    need_touch = 0
+    if comp.is_folder("/opt") == 0 then
+        need_touch = 1
+    else
+        if comp.is_folder(AESLIB.PATHS.base) == 0 then
+            need_touch = 1
+        else
+            f = comp.File(AESLIB.PATHS.mac_key_path)
+            if not f then
+                need_touch = 1
+            end if
+        end if
+    end if
+
+    if need_touch == 1 then
+        rc = comp.touch(AESLIB.PATHS.base, AESLIB.PATHS.mac_key_name)
+        // proceed to write regardless; File() will tell us if it exists
+    end if
+
+    // Optional backup of current key (any content, even if malformed)
+    if backup_opt != 0 then
+        cur = comp.File(AESLIB.PATHS.mac_key_path)
+        if cur then
+            cur_hex = cur.read()
+            // ensure backup file exists
+            if not comp.File(AESLIB.PATHS.mac_key_backup) then
+                comp.touch(AESLIB.PATHS.base, "grAESecure_mac.key.bak")
+            end if
+            bak = comp.File(AESLIB.PATHS.mac_key_backup)
+            if bak then
+                bak.write(cur_hex)
+            end if
+        end if
+    end if
+
+    // Generate fresh 32-byte key and persist as hex
+    new_key = AESLIB.BYTES.random_bytes(32)
+    new_hex = AESLIB.BYTES.to_hex(new_key)
+    nf = comp.File(AESLIB.PATHS.mac_key_path)
+    if nf then
+        nf.write(new_hex)
+    end if
+    return new_key
 end function
 
 // -------------------- PKCS#7 for CBC --------------------
@@ -242,7 +443,6 @@ A.init_sboxes = function()
     A.inv_s_box = inv
     A.sboxes_ready = 1
 end function
-
 
 // Byte-wise transforms
 A.sub_bytes = function(st)
@@ -490,6 +690,302 @@ M.cbc_decrypt = function(cipher_bytes, key32, iv16)
     return AESLIB.MODES.pkcs7_unpad(out, 16)
 end function
 
+// Sealed CBC: returns iv || ciphertext
+AESLIB.MODES.seal_cbc = function(plain_bytes, key32, iv16_opt)
+    iv = iv16_opt
+    if iv == null then
+        iv = AESLIB.BYTES.random_bytes(16)
+    end if
+    if len(iv) != 16 then
+        return [] // invalid IV
+    end if
+
+    ct = AESLIB.MODES.cbc_encrypt(plain_bytes, key32, iv)
+    // concat iv || ct
+    out = iv[:] // copy
+    append_inplace(out, ct)
+    return out
+end function
+
+// Open sealed CBC input (expects iv || ciphertext)
+AESLIB.MODES.open_cbc = function(sealed_bytes, key32)
+    if sealed_bytes == null then
+        return []
+    end if
+    if len(sealed_bytes) < 32 then
+        // need at least 16 IV + 16 CT
+        return []
+    end if
+    if (len(sealed_bytes) - 16) % 16 != 0 then
+        // ciphertext must be a multiple of 16
+        return []
+    end if
+
+    iv  = slice(sealed_bytes, 0, 16)
+    ct  = slice(sealed_bytes, 16, len(sealed_bytes))
+    pt  = AESLIB.MODES.cbc_decrypt(ct, key32, iv) // includes PKCS#7 unpad
+    return pt
+end function
+
+// seal_cbc_auth: outputs iv || ct || tag
+// key32_enc: 32B AES key; key_mac: bytes[] MAC key; tag_len: optional (default 32)
+AESLIB.MODES.seal_cbc_auth = function(plain_bytes, key32_enc, key_mac, iv16_opt, tag_len_opt)
+    iv = iv16_opt
+    if iv == null then 
+        iv = AESLIB.BYTES.random_bytes(16) 
+    end if
+    if len(iv) != 16 then 
+        return [] 
+    end if
+
+    ct = AESLIB.MODES.cbc_encrypt(plain_bytes, key32_enc, iv)
+
+    // tag = HMAC_SHA256(key_mac, iv||ct)
+    m = iv[:]
+    i = 0
+    while i < len(ct)
+        m.push(ct[i])
+        i = i + 1
+    end while
+
+    // swap this to your sha256: hash_fn = AESLIB.HASH.sha256_bytes
+    hash_fn = AESLIB.HASH.sha256_bytes  // <<< provide this
+    tag = AESLIB.BYTES.hmac(hash_fn, 64, key_mac, m)
+
+    // optional truncation
+    tlen = tag_len_opt
+    if tlen == null then 
+        tlen = 32 
+    end if
+    if tlen < 10 then 
+        tlen = 10 
+    end if  // minimum sanity
+    if tlen > len(tag) then 
+        tlen = len(tag) 
+    end if
+    tag = slice(tag, 0, tlen)
+
+    out = iv[:]
+    i = 0
+    while i < len(ct) 
+        out.push(ct[i])
+        i = i + 1
+    end while
+
+    i = 0
+    while i < len(tag)
+        out.push(tag[i])
+        i = i + 1
+    end while
+    return out
+end function
+
+// open_cbc_auth: expects iv || ct || tag; returns plaintext or []
+AESLIB.MODES.open_cbc_auth = function(sealed_bytes, key32_enc, key_mac, tag_len_opt)
+    if sealed_bytes == null then 
+        return [] 
+    end if
+    if len(sealed_bytes) < 16 + 16 + 10 then 
+        return [] 
+        end if // iv + 1blk + min tag
+
+    tlen = tag_len_opt
+    if tlen == null then 
+        tlen = 32 
+    end if
+    if tlen < 10 then 
+        tlen = 10 
+    end if
+    if tlen > len(sealed_bytes) - 16 then 
+        return [] 
+    end if
+
+    // split: iv | ct | tag
+    iv  = slice(sealed_bytes, 0, 16)
+    end_ct = len(sealed_bytes) - tlen
+    ct  = slice(sealed_bytes, 16, end_ct)
+    tag = slice(sealed_bytes, end_ct, len(sealed_bytes))
+
+    if (len(ct) % 16) != 0 then 
+        return [] 
+    end if
+
+    // recompute tag
+    m = iv[:]
+    i = 0
+    while i < len(ct)
+        m.push(ct[i])
+        i = i + 1
+    end while
+
+    hash_fn = AESLIB.HASH.sha256_bytes  // <<< provide this
+    tag2 = AESLIB.BYTES.hmac(hash_fn, 64, key_mac, m)
+    tag2 = slice(tag2, 0, len(tag))
+
+    // constant-time-ish compare
+    same = 1
+    i = 0
+    if len(tag) != len(tag2) then 
+        same = 0 
+    end if
+    if same == 1 then
+        while i < len(tag)
+            if tag[i] != tag2[i] then 
+                same = 0 
+            end if
+            i = i + 1
+        end while
+    end if
+    if same == 0 then 
+        return [] 
+    end if
+
+    // decrypt
+    return AESLIB.MODES.cbc_decrypt(ct, key32_enc, iv)
+end function
+
+// iv || ct || tag  (tag = HMAC-MD5(iv||ct), default tag_len = 16)
+AESLIB.MODES.seal_cbc_hmac_md5 = function(plain_bytes, key32_enc, key_mac, iv16_opt, tag_len_opt)
+    iv = iv16_opt
+    if iv == null then
+        iv = AESLIB.BYTES.random_bytes(16)
+    end if
+    if len(iv) != 16 then
+        return []
+    end if
+
+    ct = AESLIB.MODES.cbc_encrypt(plain_bytes, key32_enc, iv)
+
+    // m = iv || ct
+    m = []
+    i = 0
+    while i < len(iv)
+        m.push(iv[i])
+        i = i + 1
+    end while
+    i = 0
+    while i < len(ct)
+        m.push(ct[i])
+        i = i + 1
+    end while
+
+    // tag = HMAC-MD5(m)
+    tag_full = AESLIB.BYTES.hmac(AESLIB.HASH.md5_bytes, AESLIB.HASH.block_size, key_mac, m)
+
+    tlen = tag_len_opt
+    if tlen == null then 
+        tlen = 16 
+    end if      // MD5 produces 16 bytes
+    if tlen < 10 then 
+        tlen = 10 
+    end if         // minimum sane tag length
+    if tlen > len(tag_full) then 
+        tlen = len(tag_full) 
+    end if
+
+    // out = iv || ct || tag[:tlen]
+    out = []
+    i = 0
+    while i < len(iv)
+        out.push(iv[i])
+        i = i + 1
+    end while
+    i = 0
+    while i < len(ct)
+        out.push(ct[i])
+        i = i + 1
+    end while
+    i = 0
+    while i < tlen
+        out.push(tag_full[i])
+        i = i + 1
+    end while
+
+    return out
+end function
+
+// Input: iv || ct || tag  -> plaintext or [] on failure
+AESLIB.MODES.open_cbc_hmac_md5 = function(sealed_bytes, key32_enc, key_mac, tag_len_opt)
+    if sealed_bytes == null then 
+        return [] 
+    end if
+    if len(sealed_bytes) < 42 then 
+        return [] 
+    end if   // 16 iv + 16 ct + 10 min tag
+
+    tlen = tag_len_opt
+    if tlen == null then 
+        tlen = 16 
+    end if
+    if tlen < 10 then 
+        tlen = 10 
+    end if
+    if tlen > len(sealed_bytes) - 16 then 
+        return [] 
+    end if
+
+    // split iv, ct, tag
+    iv = []
+    i = 0
+    while i < 16
+        iv.push(sealed_bytes[i])
+        i = i + 1
+    end while
+
+    end_ct = len(sealed_bytes) - tlen
+    ct = []
+    i = 16
+    while i < end_ct
+        ct.push(sealed_bytes[i])
+        i = i + 1
+    end while
+
+    tag = []
+    i = end_ct
+    while i < len(sealed_bytes)
+        tag.push(sealed_bytes[i])
+        i = i + 1
+    end while
+
+    if (len(ct) % 16) != 0 then 
+        return [] 
+    end if
+
+    // recompute tag over iv||ct
+    m = []
+    i = 0
+    while i < len(iv)
+        m.push(iv[i])
+        i = i + 1
+    end while
+    i = 0
+    while i < len(ct)
+        m.push(ct[i])
+        i = i + 1
+    end while
+
+    tag2 = AESLIB.BYTES.hmac(AESLIB.HASH.md5_bytes, AESLIB.HASH.block_size, key_mac, m)
+
+    // compare first tlen bytes (constant-time-ish)
+    same = 1
+    if len(tag) != tlen then 
+        same = 0 
+    end if
+    i = 0
+    while i < tlen and same == 1
+        if tag[i] != tag2[i] then
+            same = 0
+        end if
+        i = i + 1
+    end while
+    if same == 0 then 
+        return [] 
+    end if
+
+    // decrypt on success
+    return AESLIB.MODES.cbc_decrypt(ct, key32_enc, iv)
+end function
+
 // CTR keystream: nonce||counter (16 bytes)
 // We’ll treat bytes 12..15 as a uint32 counter.
 M.ctr_xcrypt = function(bytes, key32, nonce16)
@@ -551,3 +1047,39 @@ AESLIB.decrypt_text_ctr = function(cipher_bytes, password, nonce16)
 end function
 
 AES256_LIB = AESLIB
+
+// DEV ONLY: quick round-trip
+_test_sealed_cbc = function()
+    pw  = "testpassword"
+    k32 = AESLIB.BYTES.key32_from_password(pw)
+    pt  = AESLIB.BYTES.str_to_bytes("grAESecure sealed CBC OK")
+
+    sealed = AESLIB.MODES.seal_cbc(pt, k32, null)
+    if len(sealed) == 0 then
+        print("[sealed] fail @ seal")
+        return
+    end if
+
+    opened = AESLIB.MODES.open_cbc(sealed, k32)
+    if len(opened) != len(pt) then
+        print("[sealed] fail @ len")
+        return
+    end if
+
+    i = 0
+    ok = 1
+    while i < len(pt)
+        if opened[i] != pt[i] then 
+            ok = 0 
+        end if
+        i = i + 1
+    end while
+    if ok == 1 then
+        print("[sealed] CBC round-trip OK (len=" + len(sealed) + ")")
+    else
+        print("[sealed] mismatch")
+    end if
+end function
+
+// _test_sealed_cbc()
+

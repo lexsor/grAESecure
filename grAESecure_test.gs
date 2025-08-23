@@ -118,4 +118,132 @@ ct_hex2 = AES.encrypt_text_ctr("Hello CTR (stream)", "pw123", nonce)
 back2 = AES.decrypt_text_ctr(AES.BYTES.from_hex(ct_hex2), "pw123", nonce)
 pass_fail("CTR wrapper round-trip", back2 == "Hello CTR (stream)")
 
+// -------------------- 10) Sealed CBC (iv||ct) --------------------
+msg  = "Sealed CBC round-trip OK"   // <- ASCII only
+pt3  = AES.BYTES.str_to_bytes(msg)
+
+sealed = AES.MODES.seal_cbc(pt3, key32, null)
+pass_fail("sealed_cbc length >= 32", len(sealed) >= 32 and ((len(sealed) - 16) % 16 == 0))
+
+opened = AES.MODES.open_cbc(sealed, key32)
+pass_fail("sealed_cbc open -> plaintext", AES.BYTES.bytes_to_str(opened) == msg)
+
+// deterministic check with fixed IV
+fixed_iv = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+sealed2  = AES.MODES.seal_cbc(pt3, key32, fixed_iv)
+iv2      = slice(sealed2, 0, 16)
+ct2      = slice(sealed2, 16, len(sealed2))
+expct    = AES.MODES.cbc_encrypt(pt3, key32, fixed_iv)
+
+pass_fail("sealed_cbc uses iv||ct", arr_eq(iv2, fixed_iv) and arr_eq(ct2, expct))
+back2 = AES.MODES.open_cbc(sealed2, key32)
+pass_fail("sealed_cbc fixed IV round-trip", AES.BYTES.bytes_to_str(back2) == msg)
+
+// invalid inputs
+bad_short = AES.MODES.open_cbc([1,2,3], key32)
+pass_fail("open_cbc rejects short", len(bad_short) == 0)
+
+bad_mod = slice(fixed_iv, 0, len(fixed_iv)) // start with 16 bytes
+bad_mod.push(1); bad_mod.push(2); bad_mod.push(3); bad_mod.push(4)  // +4 -> not multiple of 16
+bad_mod = AES.MODES.open_cbc(bad_mod, key32)
+pass_fail("open_cbc rejects non-multiple", len(bad_mod) == 0)
+
+// -------------------- 11) Sealed CBC + Auth --------------------
+msgA = "Sealed CBC AUTH OK"
+ptA  = AES.BYTES.str_to_bytes(msgA)
+kenc = key32                       // reuse your 32B AES key from earlier
+kmac = AES.BYTES.random_bytes(32)  // 32B MAC key
+
+sealedA = AES.MODES.seal_cbc_auth(ptA, kenc, kmac, null, 32)
+pass_fail("seal_cbc_auth layout", len(sealedA) >= 16 + 16 + 10)
+
+openA = AES.MODES.open_cbc_auth(sealedA, kenc, kmac, 32)
+pass_fail("open_cbc_auth -> plaintext", AES.BYTES.bytes_to_str(openA) == msgA)
+
+// tamper test
+if len(sealedA) > 40 then
+    sealedA[20] = sealedA[20] ^ 1
+end if
+openTamper = AES.MODES.open_cbc_auth(sealedA, kenc, kmac, 32)
+pass_fail("open_cbc_auth rejects tamper", len(openTamper) == 0)
+
+// -------------------- Sealed CBC + HMAC-MD5 --------------------
+msgA = "Sealed CBC AUTH OK"
+ptA  = AES.BYTES.str_to_bytes(msgA)
+kenc = key32                        // reuse the 32B AES key you already set up
+// kmac = AES.BYTES.random_bytes(32)   // temp MAC key for tests (we'll replace with loader next)
+kmac = AES.KEYS.load_or_create_mac_key()
+
+// Seal with random IV; tag_len = 16 (full MD5)
+sealedA = AES.MODES.seal_cbc_hmac_md5(ptA, kenc, kmac, null, 16)
+pass_fail("hmac_md5 layout", len(sealedA) >= 16 + 16 + 10 and ((len(sealedA) - 16) % 16 == 0))
+
+// Open and verify plaintext
+openA = AES.MODES.open_cbc_hmac_md5(sealedA, kenc, kmac, 16)
+pass_fail("hmac_md5 open -> plaintext", AES.BYTES.bytes_to_str(openA) == msgA)
+
+// Deterministic IV test (compare ct with plain CBC encrypt)
+fixed_iv = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+sealedB  = AES.MODES.seal_cbc_hmac_md5(ptA, kenc, kmac, fixed_iv, 16)
+ivB      = slice(sealedB, 0, 16)
+ctB      = slice(sealedB, 16, len(sealedB) - 16)
+expctB   = AES.MODES.cbc_encrypt(ptA, kenc, fixed_iv)
+eq_ct    = 1
+i = 0
+while i < len(ctB)
+    if ctB[i] != expctB[i] then 
+        eq_ct = 0 
+    end if
+    i = i + 1
+end while
+eq_iv = 1
+i = 0
+while i < 16
+    if ivB[i] != fixed_iv[i] then 
+        eq_iv = 0 
+    end if
+    i = i + 1
+end while
+pass_fail("hmac_md5 uses iv||ct", eq_iv == 1 and eq_ct == 1)
+
+// Tamper test (flip a bit in ciphertext region)
+if len(sealedA) > 40 then
+    sealedA[20] = sealedA[20] ^ 1
+end if
+openTamper = AES.MODES.open_cbc_hmac_md5(sealedA, kenc, kmac, 16)
+pass_fail("hmac_md5 rejects tamper", len(openTamper) == 0)
+
+// Wrong MAC key should fail
+kmac2 = AES.BYTES.random_bytes(32)
+openWrongKey = AES.MODES.open_cbc_hmac_md5(sealedB, kenc, kmac2, 16)
+pass_fail("hmac_md5 wrong key fails", len(openWrongKey) == 0)
+
+// Wrong AES key should fail
+kenc_bad = AES.BYTES.random_bytes(32)
+openWrongEnc = AES.MODES.open_cbc_hmac_md5(sealedB, kenc_bad, kmac, 16)
+pass_fail("hmac_md5 wrong enc key fails", len(openWrongEnc) == 0)
+
+// -------------------- Rotate MAC key: behavior test --------------------
+msgR   = "Rotate MAC key test"
+ptR    = AES.BYTES.str_to_bytes(msgR)
+kencR  = key32                           // reuse your existing 32B AES key
+kmac0  = AES.KEYS.load_or_create_mac_key()
+
+// Seal under old MAC key
+sealed_old = AES.MODES.seal_cbc_hmac_md5(ptR, kencR, kmac0, null, 16)
+ok_old     = AES.MODES.open_cbc_hmac_md5(sealed_old, kencR, kmac0, 16)
+pass_fail("pre-rotate opens OK", AES.BYTES.bytes_to_str(ok_old) == msgR)
+
+// Rotate MAC key (with backup=1)
+kmac1 = AES.KEYS.rotate_mac_key(1)
+
+// Old sealed blob should now FAIL to open under new key
+fail_after_rotate = AES.MODES.open_cbc_hmac_md5(sealed_old, kencR, kmac1, 16)
+pass_fail("old blob fails after rotate", len(fail_after_rotate) == 0)
+
+// New seals should verify under the new key
+sealed_new = AES.MODES.seal_cbc_hmac_md5(ptR, kencR, kmac1, null, 16)
+ok_new     = AES.MODES.open_cbc_hmac_md5(sealed_new, kencR, kmac1, 16)
+pass_fail("post-rotate opens OK", AES.BYTES.bytes_to_str(ok_new) == msgR)
+
 print("---- Done ----")
