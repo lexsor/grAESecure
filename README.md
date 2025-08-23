@@ -17,7 +17,7 @@ Features:
 - ⚠️ KDF and MAC are minimal (see Roadmap)
 
 ## Docs
-- [Roadmap](ROADMAP.md)
+- [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security](docs/SECURITY.md)
-- [Changelog](CHANGELOG.md)
+- [Changelog](docs/CHANGELOG.md)
