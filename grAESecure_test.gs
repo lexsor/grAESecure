@@ -223,7 +223,6 @@ while i < 256
     sb = AES256.s_box[i]
     inv = AES256.inv_s_box[sb]
     if inv != i then
-        FAIL("S-box inverse")
         ok_inv = false
         break
     end if
@@ -231,6 +230,8 @@ while i < 256
 end while
 if ok_inv then
     OK("S-box inverse")
+else
+    FAIL("S-box inverse")
 end if
 
 // ---------- 4) GF xtime/gmul sanity ----------
