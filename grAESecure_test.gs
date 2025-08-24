@@ -217,7 +217,21 @@ else
 end if
 
 // ---------- 3) S-box inverse ----------
-OK("S-box inverse")
+i = 0
+ok_inv = true
+while i < 256
+    sb = AES256.s_box[i]
+    inv = AES256.inv_s_box[sb]
+    if inv != i then
+        FAIL("S-box inverse")
+        ok_inv = false
+        break
+    end if
+    i = i + 1
+end while
+if ok_inv then
+    OK("S-box inverse")
+end if
 
 // ---------- 4) GF xtime/gmul sanity ----------
 OK("GF xtime/gmul sanity")
