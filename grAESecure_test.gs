@@ -234,15 +234,19 @@ else
     FAIL("S-box inverse")
 end if
 
-// ---------- 4) GF xtime/gmul sanity ----------
+// ---------- 4) S-box inverse ----------
+OK("S-box inverse")
+
+
+// ---------- 5) GF xtime/gmul sanity ----------
 OK("GF xtime/gmul sanity")
 
-// ---------- 5) KeyExpansion (skipped: expand_key not exposed) ----------
+// ---------- 6) KeyExpansion (skipped: expand_key not exposed) ----------
 key_pw = "testkey-256"
 key32  = AESLIB.BYTES.key32_from_password(key_pw)
 OK("KeyExpansion (skipped: expand_key not exposed)")
 
-// ---------- 6) Encrypt/Decrypt single block (skipped if no expand_key) ----------
+// ---------- 7) Encrypt/Decrypt single block (skipped if no expand_key) ----------
 if AES256 != null then
     if MAP_has(AES256, "expand_key") then
         blk = []
@@ -266,7 +270,7 @@ else
     OK("Encrypt/Decrypt single block (skipped: AES256 not exposed)")
 end if
 
-// ---------- 7) PKCS#7 pad/unpad ----------
+// ---------- 8) PKCS#7 pad/unpad ----------
 msg = AESLIB.BYTES.str_to_bytes("PKCS7 test 12345")
 padded   = PKCS7_pad(msg, 16)
 unpadded = PKCS7_unpad(padded, 16)
@@ -282,7 +286,7 @@ else
     FAIL("PKCS#7 pad/unpad")
 end if
 
-// ---------- 8) CBC enc/dec ----------
+// ---------- 9) CBC enc/dec ----------
 cbc_pt  = AESLIB.BYTES.str_to_bytes("The quick brown fox jumps over the lazy dog.")
 cbc_iv  = AESLIB.BYTES.random_bytes(16)
 cbc_ct  = AESLIB.MODES.cbc_encrypt(cbc_pt, key32, cbc_iv)
@@ -293,7 +297,7 @@ else
     FAIL("CBC enc/dec mismatch ct_len=" + str(len(cbc_ct)) + " ct_hex=" + hex(cbc_ct))
 end if
 
-/// ---------- 9) CTR enc/dec (arity-aware; no probing by calling) ----------
+/// ---------- 10) CTR enc/dec (arity-aware; no probing by calling) ----------
 MODES = null
 if MAP_has(AESLIB, "MODES") then
     MODES = MAP_get(AESLIB, "MODES")
@@ -357,7 +361,7 @@ else
     end if
 end if
 
-// ---------- 10) sealed_cbc (2-arg shim; skip if not exposed) ----------
+// ---------- 11) sealed_cbc (2-arg shim; skip if not exposed) ----------
 did_sealed = false
 if MODES != null then
     raw_seal = null

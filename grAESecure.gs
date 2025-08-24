@@ -85,13 +85,17 @@ AESLIB.BYTES._charmap = AESLIB.BYTES._build_charmap()
 
 // Clamp helper (keep yours if already present)
 AESLIB.BYTES._b = function(x)
-    if x < 0 then 
-        return 0 
+    if typeof(x) != "number" then
+        return 0
     end if
-    if x > 255 then 
-        return x % 256 
+    n = floor(x)
+    if n < 0 then
+        return 0
     end if
-    return x
+    if n > 255 then
+        return n % 256
+    end if
+    return n
 end function
 
 // Robust 1-char/number → byte
@@ -617,10 +621,13 @@ AESLIB.MODES.pkcs7_pad = function(bytes, block)
 end function
 
 AESLIB.MODES.pkcs7_unpad = function(bytes, block)
-    if len(bytes) == 0 then 
-        return [] 
+    if len(bytes) == 0 then
+        return []
     end if
     pad = bytes[len(bytes)-1]
+    if typeof(pad) != "number" then
+        return []
+    end if
     if pad <= 0 or pad > block then
         // bad pad: return original (or empty)
         return []
