@@ -621,10 +621,13 @@ AESLIB.MODES.pkcs7_pad = function(bytes, block)
 end function
 
 AESLIB.MODES.pkcs7_unpad = function(bytes, block)
-    if len(bytes) == 0 then 
-        return [] 
+    if len(bytes) == 0 then
+        return []
     end if
     pad = bytes[len(bytes)-1]
+    if typeof(pad) != "number" then
+        return []
+    end if
     if pad <= 0 or pad > block then
         // bad pad: return original (or empty)
         return []
