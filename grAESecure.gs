@@ -1138,11 +1138,11 @@ M.ctr_xcrypt = function(bytes, key32, nonce16)
     return out
 end function
 
-M.ctr_encrypt = M.ctr_xcrypt
-M.ctr_decrypt = M.ctr_xcrypt
-
-AESLIB.MODES.ctr_encrypt = AESLIB.MODES.ctr_xcrypt
-AESLIB.MODES.ctr_decrypt = AESLIB.MODES.ctr_xcrypt
+// Stable 3-arg wrappers (public API)
+AESLIB.MODES.ctr_encrypt = function(data, key32, nonce16)
+  return AESLIB.MODES.ctr_xcrypt(data, key32, nonce16)
+end function
+AESLIB.MODES.ctr_decrypt = AESLIB.MODES.ctr_encrypt
 
 // Accept either a hex string or a bytes list; fall back to raw text → bytes
 AESLIB._maybe_hex_to_bytes = function(maybe)
@@ -1190,68 +1190,6 @@ AESLIB.decrypt_text_ctr = function(cipher_in, password, nonce16)
     pt    = AESLIB.MODES.ctr_xcrypt(ct, key32, nonce16)
     return AESLIB.BYTES.bytes_to_str(pt)
 end function
-
-// ===== CTR compat (probe-safe; no direct key reads) =====
-if AESLIB != null then
-    if AESLIB.MODES != null then
-
-        // Safe fetch helper (no probing)
-        AESLIB._fetch = function(m, key)
-            if typeof(m) != "map" then 
-                return null 
-            end if
-            for kv in m
-                if typeof(kv) == "map" then
-                    if kv["key"] == key then 
-                        return kv["value"] 
-                    end if
-                else
-                    if kv == key then 
-                        return m[key] 
-                    end if
-                end if
-            end for
-            return null
-        end function
-
-        // Find any CTR core that's exposed
-        _ctr = AESLIB._fetch(AESLIB.MODES, "ctr_encrypt")
-        if _ctr == null then
-            _ctr = AESLIB._fetch(AESLIB.MODES, "ctr_decrypt")
-        end if
-        if _ctr == null then
-            _ctr = AESLIB._fetch(AESLIB.MODES, "ctr_xcrypt")
-        end if
-
-        // If we found one, expose stable names that simply forward
-        // NOTE: you MUST set the correct ARITY once to avoid "Too Many Arguments".
-        CTR_CORE_ARITY = 0   // set to 1, 2, or 3 to match your build
-
-        if _ctr != null then
-            if CTR_CORE_ARITY == 1 then
-                AESLIB.MODES.ctr_encrypt = function(data, key32_opt, nonce16_opt)
-                    return _ctr(data)
-                end function
-                AESLIB.MODES.ctr_decrypt = AESLIB.MODES.ctr_encrypt
-            else
-                if CTR_CORE_ARITY == 2 then
-                    AESLIB.MODES.ctr_encrypt = function(data, key32, nonce16_opt)
-                        return _ctr(data, key32)
-                    end function
-                    AESLIB.MODES.ctr_decrypt = AESLIB.MODES.ctr_encrypt
-                else
-                    if CTR_CORE_ARITY == 3 then
-                        AESLIB.MODES.ctr_encrypt = function(data, key32, nonce16)
-                            return _ctr(data, key32, nonce16)
-                        end function
-                        AESLIB.MODES.ctr_decrypt = AESLIB.MODES.ctr_encrypt
-                    end if
-                end if
-            end if
-        end if
-    end if
-end if
-// ===== end CTR compat =====
 
 AES256_LIB = AESLIB
 // EOF

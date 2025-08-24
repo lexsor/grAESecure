@@ -15,6 +15,9 @@ end if
 AES = AES256_LIB
 
 B = AES256_LIB.BYTES
+key   = B.random_bytes(32)
+nonce = B.random_bytes(16)
+msg   = B.str_to_bytes("ctr test")
 
 pwd  = "p@s$w0rd"
 iv   = B.random_bytes(16)
@@ -129,6 +132,12 @@ FUNC_arity = function(fn)
     end if
     return len(params)
 end function
+
+print("ctr_encrypt arity = " + str(FUNC_arity(AES256_LIB.MODES.ctr_encrypt)))
+
+ct = AES256_LIB.MODES.ctr_encrypt(msg, key, nonce)
+pt = AES256_LIB.MODES.ctr_decrypt(ct, key, nonce)
+print("CTR wrappers OK: " + (AES256_LIB.BYTES.bytes_eq(msg, pt)))
 
 // Local PKCS#7 (fallback)
 PKCS7_pad = function(data, block)
@@ -259,25 +268,35 @@ key_pw = "testkey-256"
 key32  = AESLIB.BYTES.key32_from_password(key_pw)
 OK("KeyExpansion (skipped: expand_key not exposed)")
 
-// ---------- 7) Encrypt/Decrypt single block (skipped if no expand_key) ----------
+// ---------- 7) Encrypt/Decrypt single block ----------
 if AES256 != null then
+    blk = []
+    i = 0
+    while i < 16
+        blk.push((i * 7) % 256)
+        i = i + 1
+    end while
+
+    did = false
     if MAP_has(AES256, "expand_key") then
-        blk = []
-        i = 0
-        while i < 16
-            blk.push((i * 7) % 256)
-            i = i + 1
-        end while
         rk2 = AES256.expand_key(key32)
-        enc_blk = AES256.encrypt_block(blk, rk2)
-        dec_blk = AES256.decrypt_block(enc_blk, rk2)
-        if BYTES_eq(blk, dec_blk) then
-            OK("Encrypt/Decrypt single block")
-        else
-            FAIL("Encrypt/Decrypt single block")
+        if MAP_has(AES256, "encrypt_block_rk") and MAP_has(AES256, "decrypt_block_rk") then
+            enc_blk = AES256.encrypt_block_rk(blk, rk2)
+            dec_blk = AES256.decrypt_block_rk(enc_blk, rk2)
+            did = true
         end if
+    end if
+    if did == false then
+        // fallback to key32-based API
+        enc_blk = AES256.encrypt_block(blk, key32)
+        dec_blk = AES256.decrypt_block(enc_blk, key32)
+        did = true
+    end if
+
+    if BYTES_eq(blk, dec_blk) then
+        OK("Encrypt/Decrypt single block")
     else
-        OK("Encrypt/Decrypt single block (skipped: expand_key not exposed)")
+        FAIL("Encrypt/Decrypt single block")
     end if
 else
     OK("Encrypt/Decrypt single block (skipped: AES256 not exposed)")
@@ -310,68 +329,14 @@ else
     FAIL("CBC enc/dec mismatch ct_len=" + str(len(cbc_ct)) + " ct_hex=" + hex(cbc_ct))
 end if
 
-/// ---------- 10) CTR enc/dec (arity-aware; no probing by calling) ----------
-MODES = null
-if MAP_has(AESLIB, "MODES") then
-    MODES = MAP_get(AESLIB, "MODES")
-end if
-
-if MODES == null then
-    OK("CTR enc/dec (skipped: MODES not exposed)")
+// ---------- 10) CTR enc/dec ----------
+nonce2 = AESLIB.BYTES.random_bytes(16)
+ct_ctr  = AESLIB.MODES.ctr_encrypt(cbc_pt, key32, nonce2)
+pt_ctr2 = AESLIB.MODES.ctr_decrypt(ct_ctr, key32, nonce2)
+if BYTES_eq(cbc_pt, pt_ctr2) then
+  OK("CTR enc/dec")
 else
-    raw_ctr = null
-    ctr_name = "(none)"
-    // prefer encrypt, then decrypt, then xcrypt
-    if MAP_has(MODES, "ctr_encrypt") then
-        raw_ctr = MAP_get(MODES, "ctr_encrypt")
-        ctr_name = "ctr_encrypt"
-    else
-        if MAP_has(MODES, "ctr_decrypt") then
-            raw_ctr = MAP_get(MODES, "ctr_decrypt")
-            ctr_name = "ctr_decrypt"
-        else
-            if MAP_has(MODES, "ctr_xcrypt") then
-                raw_ctr = MAP_get(MODES, "ctr_xcrypt")
-                ctr_name = "ctr_xcrypt"
-            end if
-        end if
-    end if
-
-    if raw_ctr == null then
-        OK("CTR enc/dec (skipped: no ctr_* exposed)")
-    else
-        ar = FUNC_arity(raw_ctr)
-        did = false
-        // Try to match exact arity safely (no trial calls)
-        if ar == 1 then
-            ct  = raw_ctr(cbc_pt)
-            pt2 = raw_ctr(ct)
-            did = true
-        else
-            if ar == 2 then
-                ct  = raw_ctr(cbc_pt, key32)
-                pt2 = raw_ctr(ct,   key32)
-                did = true
-            else
-                if ar >= 3 then
-                    nonce = AESLIB.BYTES.random_bytes(16)
-                    ct  = raw_ctr(cbc_pt, key32, nonce)
-                    pt2 = raw_ctr(ct,   key32, nonce)
-                    did = true
-                end if
-            end if
-        end if
-
-        if did == false then
-            OK("CTR enc/dec (skipped: unsupported arity " + str(ar) + " for " + ctr_name + ")")
-        else
-            if BYTES_eq(cbc_pt, pt2) then
-                OK("CTR enc/dec (" + ctr_name + ", " + str(ar) + "-arg)")
-            else
-                FAIL("CTR enc/dec (" + ctr_name + ", " + str(ar) + "-arg)")
-            end if
-        end if
-    end if
+  FAIL("CTR enc/dec")
 end if
 
 // ---------- 11) sealed_cbc (2-arg shim; skip if not exposed) ----------
