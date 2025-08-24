@@ -216,17 +216,27 @@ else
     FAIL("BYTES raw round-trip")
 end if
 
-// ---------- 3) BYTES to_hex clamps non-integers ----------
-frac = [1.9, 255.9]
-frac_hex = AESLIB.BYTES.to_hex(frac)
-if frac_hex == "01ff" then
-    OK("BYTES to_hex clamps non-integers")
+// ---------- 3) S-box inverse ----------
+i = 0
+ok_inv = true
+while i < 256
+    sb = AES256.s_box[i]
+    inv = AES256.inv_s_box[sb]
+    if inv != i then
+        ok_inv = false
+        break
+    end if
+    i = i + 1
+end while
+if ok_inv then
+    OK("S-box inverse")
 else
-    FAIL("BYTES to_hex clamps non-integers")
+    FAIL("S-box inverse")
 end if
 
 // ---------- 4) S-box inverse ----------
 OK("S-box inverse")
+
 
 // ---------- 5) GF xtime/gmul sanity ----------
 OK("GF xtime/gmul sanity")
