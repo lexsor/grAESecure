@@ -12,7 +12,7 @@ Features:
 - Simple password-to-key derivation
 - Built-in self-tests for correctness
 
-## StatStatus
+## Status
 - ✅ Compiles and passes self-tests (grAESecure_test.src)
 - ⚠️ KDF and MAC are minimal (see Roadmap)
 
