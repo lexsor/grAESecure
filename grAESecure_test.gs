@@ -14,13 +14,26 @@ if not AES256_LIB then
 end if
 AES = AES256_LIB
 
-//////////////////////////////////////////////////////////
-// grAESecure Test Harness v0.6
-// - Probe-safe (no direct map key indexing)
-// - No 'and'/'or'/'elseif'
-// - No raw-binary printing
-// - CTR and sealed-CBC tests use 2-arg wrappers when exposed
-//////////////////////////////////////////////////////////
+B = AES256_LIB.BYTES
+
+pwd  = "p@s$w0rd"
+iv   = B.random_bytes(16)
+nonce= B.random_bytes(16)
+
+// CBC text round-trip (hex path)
+cbc_hex = AES256_LIB.encrypt_text_cbc("hello CBC", pwd, iv)
+cbc_pt  = AES256_LIB.decrypt_text_cbc(cbc_hex, pwd, iv)
+print("Text CBC symmetric: " + (cbc_pt == "hello CBC"))
+
+// CTR text round-trip (hex path)
+ctr_hex = AES256_LIB.encrypt_text_ctr("hello CTR", pwd, nonce)
+ctr_pt  = AES256_LIB.decrypt_text_ctr(ctr_hex, pwd, nonce)
+print("Text CTR symmetric: " + (ctr_pt == "hello CTR"))
+
+// Extra: bytes-path also works
+ctr_bytes = AES256_LIB.BYTES.from_hex(ctr_hex)  // back to bytes
+ctr_pt2   = AES256_LIB.decrypt_text_ctr(ctr_bytes, pwd, nonce)
+print("Text CTR bytes-input ok: " + (ctr_pt2 == "hello CTR"))
 
 // ---------- helpers ----------
 BYTES_eq = function(a, b)

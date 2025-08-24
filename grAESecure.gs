@@ -24,14 +24,9 @@ AESLIB.PATHS.mac_key_path = AESLIB.PATHS.base + "/" + AESLIB.PATHS.mac_key_name
 AESLIB.PATHS.mac_key_backup = AESLIB.PATHS.base + "/grAESecure_mac.key.bak" 
 
 // -------------------- Small utils --------------------
-slice = function(arr, start, end_exclusive)
-    out = []
-    i = start
-    while i < end_exclusive
-        out.push(arr[i])
-        i = i + 1
-    end while
-    return out
+slice_list = function(arr, start, end_exclusive)
+  // delegate to the built-in slice() (works for lists & strings)
+  return slice(arr, start, end_exclusive)
 end function
 
 append_inplace = function(dst, src)
@@ -355,7 +350,6 @@ AESLIB.BYTES.to_printable = function(arr)
 end function
 
 // -------------------- HASH helpers (compat) --------------------
-// --- HEX helpers (robust, lazy-inited) ---
 AESLIB.BYTES._hexmap = null
 
 AESLIB.BYTES._build_hexmap = function()
@@ -534,44 +528,31 @@ end function
 AESLIB.KEYS.load_or_create_mac_key = function()
     comp = get_shell.host_computer
 
-    // Ensure PATHS exist even if bootstrap moved
-    if not AESLIB.PATHS then 
-        AESLIB.PATHS = {} 
+    // ensure base folder exists
+    base = AESLIB.PATHS.base
+    if not comp.File(base) then 
+        comp.create_folder(parent_path(base), base.remove(parent_path(base)+"/")) 
     end if
-    if not AESLIB.PATHS.base then 
-        AESLIB.PATHS.base = "/opt/crypto" 
-    end if
-    if not AESLIB.PATHS.mac_key_name then 
-        AESLIB.PATHS.mac_key_name = "grAESecure_mac.key" 
-    end if
-    if not AESLIB.PATHS.mac_key_path then 
-        AESLIB.PATHS.mac_key_path = AESLIB.PATHS.base + "/" + AESLIB.PATHS.mac_key_name 
-    end if
-    if not AESLIB.PATHS.mac_key_backup then 
-        AESLIB.PATHS.mac_key_backup = AESLIB.PATHS.base + "/grAESecure_mac.key.bak" 
-    end if
-    
-    // 1) If the file already exists and is valid, use it
-    f = comp.File(AESLIB.PATHS.mac_key_path)
+
+    // split path into dir + filename
+    full = AESLIB.PATHS.mac_key_path
+    dir  = parent_path(full)
+    name = full.remove(dir + "/")
+
+    // if already exists and valid, use it
+    f = comp.File(full)
     if f then
-        hex = f.get_content
+        hex = f.content   // docs use .content
         b = AESLIB.BYTES.from_hex(hex)
-        if b != null and len(b) == 32 then
-            return b
+        if b != null and len(b) == 32 then 
+            return b 
         end if
     end if
 
-    // 2) Ensure the file exists (creates parent dirs recursively if needed)
-    rc = comp.touch(AESLIB.PATHS.mac_key_path)
-
-    // 3) Generate and persist a fresh 32B key (hex)
+    // create empty file, then write a fresh key
+    comp.touch(dir, name)    // correct arity per docs
     key = AESLIB.BYTES.random_bytes(32)
-    hex = AESLIB.BYTES.to_hex(key)
-
-    f2 = comp.File(AESLIB.PATHS.mac_key_path)
-    if f2 then
-        f2.set_content(hex)
-    end if
+    comp.File(full).set_content(AESLIB.BYTES.to_hex(key))
     return key
 end function
 
@@ -579,27 +560,24 @@ end function
 AESLIB.KEYS.rotate_mac_key = function(backup_opt)
     comp = get_shell.host_computer
 
-    // Ensure current and backup files exist so File() yields file objects
-    comp.touch(AESLIB.PATHS.mac_key_path)
-    comp.touch(AESLIB.PATHS.mac_key_backup)
+    // ensure current + backup exist
+    cur  = AESLIB.PATHS.mac_key_path
+    bakp = AESLIB.PATHS.mac_key_backup
+    curd = parent_path(cur);  curn = cur.remove(curd + "/")
+    bakd = parent_path(bakp); bakn = bakp.remove(bakd + "/")
+    comp.touch(curd, curn)
+    comp.touch(bakd, bakn)
 
-    // Optional backup of current content (even if malformed)
     if backup_opt != 0 then
-        cur = comp.File(AESLIB.PATHS.mac_key_path)
-        bak = comp.File(AESLIB.PATHS.mac_key_backup)
-        if cur and bak then
-            cur_hex = cur.get_content
-            bak.set_content(cur_hex)
+        curf = comp.File(cur)
+        bakf = comp.File(bakp)
+        if curf and bakf then 
+            bakf.set_content(curf.content) 
         end if
     end if
 
-    // Write new key
     new_key = AESLIB.BYTES.random_bytes(32)
-    new_hex = AESLIB.BYTES.to_hex(new_key)
-    nf = comp.File(AESLIB.PATHS.mac_key_path)
-    if nf then
-        nf.set_content(new_hex)
-    end if
+    comp.File(cur).set_content(AESLIB.BYTES.to_hex(new_key))
     return new_key
 end function
 
@@ -640,7 +618,7 @@ AESLIB.MODES.pkcs7_unpad = function(bytes, block)
         end if
         i = i + 1
     end while
-    return slice(bytes, 0, len(bytes)-pad)
+    return slice_list(bytes, 0, len(bytes)-pad)
 end function
 
 // -------------------- AES-256 CORE --------------------
@@ -839,7 +817,7 @@ A.key_expansion_256 = function(key32)
     i = 8
     rci = 0
     while i < 60
-        temp = W[i-1][:]
+        temp = W[i-1][0:]
         if i % 8 == 0 then
             temp = A.sub_word(A.rot_word(temp))
             temp[0] = bitwise("^", temp[0], A.rcon[rci])
@@ -876,10 +854,10 @@ A.encrypt_block = function(pt16, key32)
     end if
 
     rk = A.key_expansion_256(key32)
-    st = pt16[:]
+    st = pt16[0:]
 
     // round 0
-    st = A.add_round_key(st, slice(rk, 0, 16))
+    st = A.add_round_key(st, slice_list(rk, 0, 16))
 
     // rounds 1..13
     r = 1
@@ -887,14 +865,14 @@ A.encrypt_block = function(pt16, key32)
         st = A.sub_bytes(st)
         st = A.shift_rows(st)
         st = A.mix_columns(st)
-        st = A.add_round_key(st, slice(rk, 16*r, 16*(r+1)))
+        st = A.add_round_key(st, slice_list(rk, 16*r, 16*(r+1)))
         r = r + 1
     end while
 
     // final (no MixColumns)
     st = A.sub_bytes(st)
     st = A.shift_rows(st)
-    st = A.add_round_key(st, slice(rk, 224, 240))
+    st = A.add_round_key(st, slice_list(rk, 224, 240))
     return st
 end function
 
@@ -907,17 +885,17 @@ A.decrypt_block = function(ct16, key32)
     end if
 
     rk = A.key_expansion_256(key32)
-    st = ct16[:]
+    st = ct16[0:]
 
     // inverse final
-    st = A.add_round_key(st, slice(rk, 224, 240))
+    st = A.add_round_key(st, slice_list(rk, 224, 240))
     st = A.inv_shift_rows(st)
     st = A.inv_sub_bytes(st)
 
     // rounds 13..1
     r = 13
     while r >= 1
-        st = A.add_round_key(st, slice(rk, 16*r, 16*(r+1)))
+        st = A.add_round_key(st, slice_list(rk, 16*r, 16*(r+1)))
         st = A.inv_mix_columns(st)
         st = A.inv_shift_rows(st)
         st = A.inv_sub_bytes(st)
@@ -925,7 +903,7 @@ A.decrypt_block = function(ct16, key32)
     end while
 
     // round 0
-    st = A.add_round_key(st, slice(rk, 0, 16))
+    st = A.add_round_key(st, slice_list(rk, 0, 16))
     return st
 end function
 
@@ -949,10 +927,10 @@ M.cbc_encrypt = function(plain_bytes, key32, iv16)
     // PKCS#7 pad
     data = AESLIB.MODES.pkcs7_pad(plain_bytes, 16)
     out = []
-    prev = iv16[:]
+    prev = iv16[0:]
     i = 0
     while i < len(data)
-        blk = slice(data, i, i+16)
+        blk = slice_list(data, i, i+16)
         x = M.xor_block(blk, prev)
         c = A.encrypt_block(x, key32)
         append_inplace(out, c)
@@ -967,10 +945,10 @@ M.cbc_decrypt = function(cipher_bytes, key32, iv16)
         return [] 
     end if
     out = []
-    prev = iv16[:]
+    prev = iv16[0:]
     i = 0
     while i < len(cipher_bytes)
-        cblk = slice(cipher_bytes, i, i+16)
+        cblk = slice_list(cipher_bytes, i, i+16)
         x = A.decrypt_block(cblk, key32)
         pblk = M.xor_block(x, prev)
         append_inplace(out, pblk)
@@ -1104,7 +1082,7 @@ AESLIB.MODES.seal_cbc = function(plain_bytes, key32, iv16_opt)
 
     ct = AESLIB.MODES.cbc_encrypt(plain_bytes, key32, iv)
     // concat iv || ct
-    out = iv[:] // copy
+    out = iv[0:] // copy
     append_inplace(out, ct)
     return out
 end function
@@ -1123,8 +1101,8 @@ AESLIB.MODES.open_cbc = function(sealed_bytes, key32)
         return []
     end if
 
-    iv  = slice(sealed_bytes, 0, 16)
-    ct  = slice(sealed_bytes, 16, len(sealed_bytes))
+    iv  = slice_list(sealed_bytes, 0, 16)
+    ct  = slice_list(sealed_bytes, 16, len(sealed_bytes))
     pt  = AESLIB.MODES.cbc_decrypt(ct, key32, iv) // includes PKCS#7 unpad
     return pt
 end function
@@ -1140,7 +1118,7 @@ M.ctr_xcrypt = function(bytes, key32, nonce16)
     i = 0
     while i < len(bytes)
         // build counter block
-        block = nonce16[:]
+        block = nonce16[0:]
         c0 = bitwise("&", counter, 255)
         c1 = bitwise("&", bitwise(">>", counter, 8), 255)
         c2 = bitwise("&", bitwise(">>", counter, 16), 255)
@@ -1166,18 +1144,35 @@ M.ctr_decrypt = M.ctr_xcrypt
 AESLIB.MODES.ctr_encrypt = AESLIB.MODES.ctr_xcrypt
 AESLIB.MODES.ctr_decrypt = AESLIB.MODES.ctr_xcrypt
 
+// Accept either a hex string or a bytes list; fall back to raw text → bytes
+AESLIB._maybe_hex_to_bytes = function(maybe)
+    if typeof(maybe) == "string" then
+        b = AESLIB.BYTES.from_hex(maybe)
+        if len(b) > 0 then 
+            return b 
+        end if
+        // not valid hex (or empty) → interpret as raw text
+        return AESLIB.BYTES.str_to_bytes(maybe)
+    end if
+    return maybe  // already a list (bytes), passthrough
+end function
+
 // -------------------- Friendly text wrappers --------------------
 // CBC: returns hex string by default (easy to store)
-AESLIB.encrypt_text_cbc = function(text, password, iv16)
+AESLIB.encrypt_text_cbc = function(text, password, iv16, as_hex_opt)
     key32 = AESLIB.BYTES.key32_from_password(password)
     pt    = AESLIB.BYTES.str_to_bytes(text)
     ct    = AESLIB.MODES.cbc_encrypt(pt, key32, iv16)
+    if as_hex_opt == 0 then 
+        return ct 
+    end if
     return AESLIB.BYTES.to_hex(ct)
 end function
 
-AESLIB.decrypt_text_cbc = function(cipher_bytes, password, iv16)
+AESLIB.decrypt_text_cbc = function(cipher_in, password, iv16)
     key32 = AESLIB.BYTES.key32_from_password(password)
-    pt    = AESLIB.MODES.cbc_decrypt(cipher_bytes, key32, iv16)
+    ct    = AESLIB._maybe_hex_to_bytes(cipher_in)
+    pt    = AESLIB.MODES.cbc_decrypt(ct, key32, iv16)
     return AESLIB.BYTES.bytes_to_str(pt)
 end function
 
@@ -1189,9 +1184,10 @@ AESLIB.encrypt_text_ctr = function(text, password, nonce16)
     return AESLIB.BYTES.to_hex(ct)
 end function
 
-AESLIB.decrypt_text_ctr = function(cipher_bytes, password, nonce16)
+AESLIB.decrypt_text_ctr = function(cipher_in, password, nonce16)
     key32 = AESLIB.BYTES.key32_from_password(password)
-    pt    = AESLIB.MODES.ctr_xcrypt(cipher_bytes, key32, nonce16)
+    ct    = AESLIB._maybe_hex_to_bytes(cipher_in)
+    pt    = AESLIB.MODES.ctr_xcrypt(ct, key32, nonce16)
     return AESLIB.BYTES.bytes_to_str(pt)
 end function
 
