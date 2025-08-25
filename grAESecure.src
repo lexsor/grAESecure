@@ -23,6 +23,14 @@ AESLIB.PATHS.mac_key_name = "grAESecure_mac.key"
 AESLIB.PATHS.mac_key_path = AESLIB.PATHS.base + "/" + AESLIB.PATHS.mac_key_name
 AESLIB.PATHS.mac_key_backup = AESLIB.PATHS.base + "/grAESecure_mac.key.bak"
 
+// ---- DEBUG FLAG ----
+AESLIB.DEBUG_CTR = 0
+AESLIB.DEBUG_SEAL = 0
+AESLIB.DEBUG_HASH = 0
+// (optional, only if you added these in the lib)
+AESLIB.DEBUG_HMAC = 0
+AESLIB.DEBUG_OPEN = 0
+
 // -------------------- Small utils --------------------
 slice_list = function(arr, start, end_exclusive)
     return slice(arr, start, end_exclusive)
@@ -212,21 +220,37 @@ AESLIB.BYTES.bytes_to_str = function(arr)
     if arr == null then
         return ""
     end if
+
+    // If already a string, passthrough
     if typeof(arr) == "string" then
         return arr
     end if
+
+    // Normalize non-lists to a numeric byte list
     if typeof(arr) != "list" then
         arr = AESLIB.BYTES.map_numeric_bytes_to_list(arr)
     end if
+
     s = ""
     i = 0
     while i < len(arr)
+        // Coerce to number 0..255 without loops
         v = arr[i]
-        s = s + AESLIB.BYTES._safe_char(v)
+        if typeof(v) != "number" then
+            v = 0
+        end if
+        if v < 0 then
+            v = 0
+        end if
+        if v > 255 then
+            v = v % 256
+        end if
+        s = s + char(v)
         i = i + 1
     end while
     return s
 end function
+
 
 // string -> bytes[]  (pure char→code mapping, 0..255)
 AESLIB.BYTES.str_to_bytes = function(s)
@@ -434,10 +458,38 @@ AESLIB.BYTES.to_hex = function(arr)
 end function
 
 // MD5 -> bytes[]
+
+// before: ih = AESLIB.HASH.md5_bytes(inner)
+if AESLIB.DEBUG_HMAC != 0 then
+    print("[HMAC] inner first/last=" + str(inner[0]) + "," + str(inner[len(inner)-1]))
+end if
+
+// before: return AESLIB.HASH.md5_bytes(outer)
+if AESLIB.DEBUG_HMAC != 0 then
+    print("[HMAC] outer first/last=" + str(outer[0]) + "," + str(outer[len(outer)-1]))
+end if
+
 AESLIB.HASH.md5_bytes = function(data_bytes)
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HASH] md5_bytes in len=" + str(len(data_bytes)))
+    end if
     s = AESLIB.BYTES.bytes_to_str(data_bytes)
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HASH] md5_bytes str_len=" + str(len(s)))
+    end if
     hhex = md5(s)
-    return AESLIB.BYTES.from_hex(hhex)
+    if AESLIB.DEBUG_HASH != 0 then
+        if hhex == null then
+            print("[HASH] md5 hex is null")
+        else
+            print("[HASH] md5 hex len=" + str(len(hhex)))
+        end if
+    end if
+    out = AESLIB.BYTES.from_hex(hhex)
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HASH] md5 out len=" + str(len(out)))
+    end if
+    return out
 end function
 
 AESLIB.HASH.block_size = 64
@@ -450,21 +502,44 @@ AESLIB.BYTES.hmac_md5 = function(key, msg)
     if msg == null then
         msg = []
     end if
+
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HMAC] start key_len=" + str(len(key)) + " msg_len=" + str(len(msg)))
+    end if
+
     block_size = 64
+
     k = []
     i = 0
     while i < len(key)
         k.push(key[i])
         i = i + 1
     end while
-    if len(k) > block_size then
-        k = AESLIB.HASH.md5_bytes(k)
+
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HMAC] copied key len=" + str(len(k)))
     end if
+
+    if len(k) > block_size then
+        if AESLIB.DEBUG_HASH != 0 then
+            print("[HMAC] key>block, hashing key")
+        end if
+        k = AESLIB.HASH.md5_bytes(k)
+        if AESLIB.DEBUG_HASH != 0 then
+            print("[HMAC] hashed key len=" + str(len(k)))
+        end if
+    end if
+
     i = len(k)
     while i < block_size
         k.push(0)
         i = i + 1
     end while
+
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HMAC] key padded len=" + str(len(k)))
+    end if
+
     ipad = []
     opad = []
     i = 0
@@ -473,12 +548,18 @@ AESLIB.BYTES.hmac_md5 = function(key, msg)
         opad.push(92)
         i = i + 1
     end while
+
     i = 0
     while i < block_size
         ipad[i] = ipad[i] ^ k[i]
         opad[i] = opad[i] ^ k[i]
         i = i + 1
     end while
+
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HMAC] pads xored")
+    end if
+
     inner = []
     i = 0
     while i < block_size
@@ -490,7 +571,18 @@ AESLIB.BYTES.hmac_md5 = function(key, msg)
         inner.push(msg[i])
         i = i + 1
     end while
+
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HMAC] inner_len=" + str(len(inner)))
+        print("[HMAC] calling md5(inner)")
+    end if
+
     ih = AESLIB.HASH.md5_bytes(inner)
+
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HMAC] ih_len=" + str(len(ih)))
+    end if
+
     outer = []
     i = 0
     while i < block_size
@@ -502,7 +594,20 @@ AESLIB.BYTES.hmac_md5 = function(key, msg)
         outer.push(ih[i])
         i = i + 1
     end while
-    return AESLIB.HASH.md5_bytes(outer)
+
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HMAC] outer_len=" + str(len(outer)))
+        print("[HMAC] calling md5(outer)")
+    end if
+
+    out = AESLIB.HASH.md5_bytes(outer)
+
+    if AESLIB.DEBUG_HASH != 0 then
+        print("[HMAC] out_len=" + str(len(out)))
+        print("[HMAC] done")
+    end if
+
+    return out
 end function
 
 // -------------------- KEYS: load-or-create MAC key --------------------
@@ -948,18 +1053,53 @@ end function
 
 // iv || ct || tag  (tag = HMAC-MD5(iv||ct), default tag_len = 16)
 AESLIB.MODES.seal_cbc_hmac_md5 = function(plain_bytes, key32_enc, key_mac, iv16_opt, tag_len_opt)
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[SEAL] start")
+        print("[SEAL] pt_len=" + str(len(plain_bytes)))
+        print("[SEAL] key_enc_len=" + str(len(key32_enc)))
+        print("[SEAL] key_mac_len=" + str(len(key_mac)))
+        if iv16_opt == null then
+            print("[SEAL] iv passed = null")
+        else
+            print("[SEAL] iv passed len=" + str(len(iv16_opt)))
+        end if
+    end if
+
     iv = iv16_opt
     if iv == null then
         iv = AESLIB.BYTES.random_bytes(16)
+        if AESLIB.DEBUG_SEAL != 0 then
+            print("[SEAL] iv generated len=" + str(len(iv)))
+        end if
     end if
+
     if len(iv) != 16 then
+        if AESLIB.DEBUG_SEAL != 0 then
+            print("[SEAL] bad iv length")
+        end if
         return []
     end if
+
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[SEAL] calling cbc_encrypt")
+    end if
     ct = AESLIB.MODES.cbc_encrypt(plain_bytes, key32_enc, iv)
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[SEAL] ct_len=" + str(len(ct)))
+    end if
+
     m = []
     AESLIB.BYTES.append_all(m, iv)
     AESLIB.BYTES.append_all(m, ct)
+
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[SEAL] computing hmac over iv||ct, m_len=" + str(len(m)))
+    end if
     tag_full = AESLIB.BYTES.hmac_md5(key_mac, m)
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[SEAL] tag_full_len=" + str(len(tag_full)))
+    end if
+
     tlen = tag_len_opt
     if tlen == null then
         tlen = 16
@@ -970,20 +1110,41 @@ AESLIB.MODES.seal_cbc_hmac_md5 = function(plain_bytes, key32_enc, key_mac, iv16_
     if tlen > len(tag_full) then
         tlen = len(tag_full)
     end if
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[SEAL] tag_len=" + str(tlen))
+    end if
+
     out = []
     AESLIB.BYTES.append_all(out, iv)
     AESLIB.BYTES.append_all(out, ct)
     AESLIB.BYTES.append_slice(out, tag_full, 0, tlen)
+
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[SEAL] out_len=" + str(len(out)))
+        print("[SEAL] done")
+    end if
+
     return out
 end function
 
 AESLIB.MODES.open_cbc_hmac_md5 = function(sealed_bytes, key32_enc, key_mac, tag_len_opt)
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[OPEN] start sealed_len=" + str(len(sealed_bytes)))
+    end if
+
     if sealed_bytes == null then
+        if AESLIB.DEBUG_SEAL != 0 then
+            print("[OPEN] sealed is null")
+        end if
         return []
     end if
     if len(sealed_bytes) < 42 then
+        if AESLIB.DEBUG_SEAL != 0 then
+            print("[OPEN] too short")
+        end if
         return []
     end if
+
     tlen = tag_len_opt
     if tlen == null then
         tlen = 16
@@ -992,14 +1153,19 @@ AESLIB.MODES.open_cbc_hmac_md5 = function(sealed_bytes, key32_enc, key_mac, tag_
         tlen = 10
     end if
     if tlen > len(sealed_bytes) - 16 then
+        if AESLIB.DEBUG_SEAL != 0 then
+            print("[OPEN] bad tag_len")
+        end if
         return []
     end if
+
     iv = []
     i = 0
     while i < 16
         iv.push(sealed_bytes[i])
         i = i + 1
     end while
+
     end_ct = len(sealed_bytes) - tlen
     ct = []
     i = 16
@@ -1007,32 +1173,58 @@ AESLIB.MODES.open_cbc_hmac_md5 = function(sealed_bytes, key32_enc, key_mac, tag_
         ct.push(sealed_bytes[i])
         i = i + 1
     end while
+
     tag = []
     i = end_ct
     while i < len(sealed_bytes)
         tag.push(sealed_bytes[i])
         i = i + 1
     end while
+
     if (len(ct) % 16) != 0 then
+        if AESLIB.DEBUG_SEAL != 0 then
+            print("[OPEN] ct not multiple of 16")
+        end if
         return []
     end if
+
     m = []
     AESLIB.BYTES.append_all(m, iv)
     AESLIB.BYTES.append_all(m, ct)
+
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[OPEN] verify tag, m_len=" + str(len(m)) + " tag_len=" + str(len(tag)))
+    end if
     tag2 = AESLIB.BYTES.hmac_md5(key_mac, m)
-    if len(tag) != tlen then
+
+    if len(tag) != len(tag2) then
+        if AESLIB.DEBUG_SEAL != 0 then
+            print("[OPEN] tag length mismatch")
+        end if
         return []
     end if
+
     diff = 0
     i = 0
-    while i < tlen
+    while i < len(tag)
         diff = bitwise("|", diff, bitwise("^", tag[i], tag2[i]))
         i = i + 1
     end while
     if diff != 0 then
+        if AESLIB.DEBUG_SEAL != 0 then
+            print("[OPEN] tag mismatch")
+        end if
         return []
     end if
-    return AESLIB.MODES.cbc_decrypt(ct, key32_enc, iv)
+
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[OPEN] tag ok, decrypt")
+    end if
+    pt = AESLIB.MODES.cbc_decrypt(ct, key32_enc, iv)
+    if AESLIB.DEBUG_SEAL != 0 then
+        print("[OPEN] done pt_len=" + str(len(pt)))
+    end if
+    return pt
 end function
 
 // optional friendly aliases
@@ -1069,9 +1261,6 @@ AESLIB.MODES.open_cbc = function(sealed_bytes, key32)
     pt = AESLIB.MODES.cbc_decrypt(ct, key32, iv)
     return pt
 end function
-
-// ---- CTR DEBUG FLAG ----
-AESLIB.DEBUG_CTR = 0
 
 // CTR keystream: nonce||counter (16 bytes)
 // We’ll treat bytes 12..15 as a uint32 counter.
