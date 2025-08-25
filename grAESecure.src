@@ -8,25 +8,24 @@
 //////////////////////////////////////////////////////////
 
 // ==== grAESecure bootstrap (must come first) ====
-// Use AESLIB internally; export via AES256_LIB
+// Use AESLIB internally, export via AES256_LIB
 AESLIB = {}
-AESLIB.PATHS = {} 
-AESLIB.BYTES = {} 
-AESLIB.MODES = {} 
-AESLIB.HASH  = {} 
-AESLIB.KEYS  = {} 
+AESLIB.PATHS = {}
+AESLIB.BYTES = {}
+AESLIB.MODES = {}
+AESLIB.HASH  = {}
+AESLIB.KEYS  = {}
 AESLIB.AES256 = {}
 
 // Default paths (used by KEYS helpers)
-AESLIB.PATHS.base = "/opt/crypto" 
-AESLIB.PATHS.mac_key_name = "grAESecure_mac.key" 
-AESLIB.PATHS.mac_key_path = AESLIB.PATHS.base + "/" + AESLIB.PATHS.mac_key_name 
-AESLIB.PATHS.mac_key_backup = AESLIB.PATHS.base + "/grAESecure_mac.key.bak" 
+AESLIB.PATHS.base = "/opt/crypto"
+AESLIB.PATHS.mac_key_name = "grAESecure_mac.key"
+AESLIB.PATHS.mac_key_path = AESLIB.PATHS.base + "/" + AESLIB.PATHS.mac_key_name
+AESLIB.PATHS.mac_key_backup = AESLIB.PATHS.base + "/grAESecure_mac.key.bak"
 
 // -------------------- Small utils --------------------
 slice_list = function(arr, start, end_exclusive)
-  // delegate to the built-in slice() (works for lists & strings)
-  return slice(arr, start, end_exclusive)
+    return slice(arr, start, end_exclusive)
 end function
 
 append_inplace = function(dst, src)
@@ -45,8 +44,8 @@ AESLIB.BYTES.append_all = function(dst, src)
         v = src[i]
         if v == null then
             v = src[str(i)]
-            if v == null then 
-                break 
+            if v == null then
+                break
             end if
         end if
         dst.push(v)
@@ -56,7 +55,13 @@ end function
 
 AESLIB.BYTES.append_slice = function(dst, src, start, end_exclusive)
     i = start
-    while i < end_exclusive and i < len(src)
+    while true
+        if i >= end_exclusive then
+            break
+        end if
+        if i >= len(src) then
+            break
+        end if
         dst.push(src[i])
         i = i + 1
     end while
@@ -68,8 +73,8 @@ AESLIB.BYTES._build_charmap = function()
     m = {}
     i = 0
     while i < 256
-        c = char(i)   // string of length 1
-        m[c] = i      // key is a string, value is number
+        c = char(i)
+        m[c] = i
         i = i + 1
     end while
     return m
@@ -95,38 +100,29 @@ end function
 
 // Robust 1-char/number → byte
 AESLIB.BYTES._ord1 = function(x)
-    if x == null then 
-        return 0 
+    if x == null then
+        return 0
     end if
-
     if typeof(x) == "number" then
         return AESLIB.BYTES._b(x)
     end if
-
     if typeof(x) == "string" then
-        if len(x) == 0 then 
-            return 0 
+        if len(x) == 0 then
+            return 0
         end if
-
-        // IMPORTANT: if it's exactly one character, use the charmap
         if len(x) == 1 then
-            v = AESLIB.BYTES._charmap[x]     // map "0" -> 48, "A" -> 65, etc.
-            if v != null then 
-                return v 
-            else 
-                return 0 
+            v = AESLIB.BYTES._charmap[x]
+            if v != null then
+                return v
             end if
+            return 0
         end if
-
-        // Longer strings like "255" can be parsed numerically
         n = to_int(x)
         if typeof(n) == "number" then
             return AESLIB.BYTES._b(n)
         end if
-
         return 0
     end if
-
     return 0
 end function
 
@@ -138,12 +134,11 @@ AESLIB.BYTES.map_numeric_bytes_to_list = function(m)
         val = null
         if typeof(kv) == "map" then
             keystr = kv["key"]
-            val    = kv["value"]
+            val = kv["value"]
         else
             keystr = kv
-            val    = m[keystr]
+            val = m[keystr]
         end if
-
         idx = to_int(keystr)
         if typeof(idx) == "number" then
             if typeof(val) != "number" then
@@ -152,21 +147,20 @@ AESLIB.BYTES.map_numeric_bytes_to_list = function(m)
             pairs.push([idx, AESLIB.BYTES._b(val)])
         end if
     end for
-
-    // selection sort by idx
     i = 0
     while i < len(pairs) - 1
         min_i = i
         j = i + 1
         while j < len(pairs)
             if pairs[j][0] < pairs[min_i][0] then
-                tmp = pairs[min_i]; pairs[min_i] = pairs[j]; pairs[j] = tmp
+                tmp = pairs[min_i]
+                pairs[min_i] = pairs[j]
+                pairs[j] = tmp
             end if
             j = j + 1
         end while
         i = i + 1
     end while
-
     out = []
     i = 0
     while i < len(pairs)
@@ -178,10 +172,8 @@ end function
 
 // Always return a 1-char string for any input, never throws.
 AESLIB.BYTES._safe_char = function(v)
-    // 1) Coerce to an integer n
     n = 0
     t = typeof(v)
-
     if t == "number" then
         n = floor(v)
     else
@@ -191,7 +183,6 @@ AESLIB.BYTES._safe_char = function(v)
                 if typeof(tn) == "number" then
                     n = tn
                 else
-                    // use first character via charmap
                     c = v[0]
                     cv = AESLIB.BYTES._charmap[c]
                     if cv != null then
@@ -204,37 +195,29 @@ AESLIB.BYTES._safe_char = function(v)
                 n = 0
             end if
         else
-            // maps/others → treat as 0
             n = 0
         end if
     end if
-
-    // 2) Clamp to 0..255 using integer-only steps
     while n < 0
         n = n + 256
     end while
     while n >= 256
         n = n - 256
     end while
-
-    // 3) Return a valid single character
     return char(n)
 end function
 
 // --- bytes[] or map{"0":..} → string (crash-proof) ---
 AESLIB.BYTES.bytes_to_str = function(arr)
-    if arr == null then 
-        return "" 
+    if arr == null then
+        return ""
     end if
-    if typeof(arr) == "string" then 
-        return arr 
+    if typeof(arr) == "string" then
+        return arr
     end if
-
-    // Normalize non-lists (maps/pairs) to a proper list of bytes
     if typeof(arr) != "list" then
         arr = AESLIB.BYTES.map_numeric_bytes_to_list(arr)
     end if
-
     s = ""
     i = 0
     while i < len(arr)
@@ -247,14 +230,14 @@ end function
 
 // string -> bytes[]  (pure char→code mapping, 0..255)
 AESLIB.BYTES.str_to_bytes = function(s)
-    if s == null then 
-        return [] 
+    if s == null then
+        return []
     end if
     out = []
     i = 0
     while i < len(s)
-        c = s[i]                              // single-character string
-        v = AESLIB.BYTES._charmap[c]          // 0..255
+        c = s[i]
+        v = AESLIB.BYTES._charmap[c]
         if v == null then
             v = 0
         end if
@@ -269,8 +252,7 @@ AESLIB.BYTES.random_bytes = function(n)
     out = []
     i = 0
     while i < n
-        // rnd in [0,1); scale to [0,255]
-        out.push( floor(rnd * 256) )
+        out.push(floor(rnd * 256))
         i = i + 1
     end while
     return out
@@ -281,11 +263,13 @@ AESLIB.BYTES.key32_from_password = function(password)
     key = []
     prev = password
     while len(key) < 32
-        h = md5(prev) // returns hex string length 32
+        h = md5(prev)
         hb = AESLIB.BYTES.from_hex(h)
-        // append up to remaining bytes
         i = 0
-        while i < len(hb) and len(key) < 32
+        while i < len(hb)
+            if len(key) >= 32 then
+                break
+            end if
             key.push(hb[i])
             i = i + 1
         end while
@@ -296,16 +280,19 @@ end function
 
 // Strict bytes equality
 AESLIB.BYTES.bytes_eq = function(a, b)
-    if a == null or b == null then 
-        return false 
+    if a == null then
+        return false
     end if
-    if len(a) != len(b) then 
-        return false 
+    if b == null then
+        return false
+    end if
+    if len(a) != len(b) then
+        return false
     end if
     i = 0
     while i < len(a)
-        if a[i] != b[i] then 
-            return false 
+        if a[i] != b[i] then
+            return false
         end if
         i = i + 1
     end while
@@ -314,10 +301,9 @@ end function
 
 // Printable view for debugging (ASCII -> char, others -> \xHH)
 AESLIB.BYTES.to_printable = function(arr)
-    if arr == null then 
-        return "" 
+    if arr == null then
+        return ""
     end if
-    // Normalize maps to lists if needed
     if typeof(arr) != "list" then
         arr = AESLIB.BYTES.map_numeric_bytes_to_list(arr)
     end if
@@ -329,19 +315,19 @@ AESLIB.BYTES.to_printable = function(arr)
         if typeof(v) != "number" then
             v = AESLIB.BYTES._ord1(v)
         end if
-        // clamp 0..255
         while v < 0
             v = v + 256
         end while
         while v >= 256
             v = v - 256
         end while
-
-        // printable ASCII 32..126
-        if v >= 32 and v <= 126 then
-            s = s + char(v)
+        if v >= 32 then
+            if v <= 126 then
+                s = s + char(v)
+            else
+                s = s + "\\x" + hex[floor(v / 16)] + hex[v % 16]
+            end if
         else
-            // \xHH
             s = s + "\\x" + hex[floor(v / 16)] + hex[v % 16]
         end if
         i = i + 1
@@ -354,17 +340,24 @@ AESLIB.BYTES._hexmap = null
 
 AESLIB.BYTES._build_hexmap = function()
     m = {}
-    // digits
     i = 0
     while i <= 9
         s = str(i)
         m[s] = i
         i = i + 1
     end while
-    // lowercase
-    m["a"] = 10; m["b"] = 11; m["c"] = 12; m["d"] = 13; m["e"] = 14; m["f"] = 15
-    // uppercase
-    m["A"] = 10; m["B"] = 11; m["C"] = 12; m["D"] = 13; m["E"] = 14; m["F"] = 15
+    m["a"] = 10
+    m["b"] = 11
+    m["c"] = 12
+    m["d"] = 13
+    m["e"] = 14
+    m["f"] = 15
+    m["A"] = 10
+    m["B"] = 11
+    m["C"] = 12
+    m["D"] = 13
+    m["E"] = 14
+    m["F"] = 15
     return m
 end function
 
@@ -373,8 +366,8 @@ AESLIB.BYTES._hx = function(ch)
         AESLIB.BYTES._hexmap = AESLIB.BYTES._build_hexmap()
     end if
     v = AESLIB.BYTES._hexmap[ch]
-    if v == null then 
-        return -1 
+    if v == null then
+        return -1
     end if
     return v
 end function
@@ -382,32 +375,37 @@ end function
 // Converts a hex string (optionally with spaces/newlines) to bytes[].
 // Returns [] on any invalid input.
 AESLIB.BYTES.from_hex = function(hs)
-    if hs == null then 
-        return [] 
+    if hs == null then
+        return []
     end if
-
-    // strip whitespace
     clean = ""
     i = 0
     while i < len(hs)
         c = hs[i]
-        if c != " " and c != "\t" and c != "\r" and c != "\n" then
-            clean = clean + c
+        if c != " " then
+            if c != "\t" then
+                if c != "\r" then
+                    if c != "\n" then
+                        clean = clean + c
+                    end if
+                end if
+            end if
         end if
         i = i + 1
     end while
-
-    if (len(clean) % 2) != 0 then 
-        return [] 
+    if (len(clean) % 2) != 0 then
+        return []
     end if
-
     out = []
     i = 0
     while i < len(clean)
         hi = AESLIB.BYTES._hx(clean[i])
         lo = AESLIB.BYTES._hx(clean[i + 1])
-        if hi < 0 or lo < 0 then 
-            return [] 
+        if hi < 0 then
+            return []
+        end if
+        if lo < 0 then
+            return []
         end if
         out.push(hi * 16 + lo)
         i = i + 2
@@ -417,8 +415,8 @@ end function
 
 // Hex encoder (lowercase)
 AESLIB.BYTES.to_hex = function(arr)
-    if arr == null then 
-        return "" 
+    if arr == null then
+        return ""
     end if
     hex = "0123456789abcdef"
     s = ""
@@ -426,7 +424,6 @@ AESLIB.BYTES.to_hex = function(arr)
     while i < len(arr)
         b = arr[i]
         if typeof(b) != "number" then
-            // fallback if a stray char sneaks in
             b = AESLIB.BYTES._ord1(b)
         end if
         v = AESLIB.BYTES._b(b)
@@ -438,45 +435,36 @@ end function
 
 // MD5 -> bytes[]
 AESLIB.HASH.md5_bytes = function(data_bytes)
-    // md5() returns a hex string; convert to bytes
-    s    = AESLIB.BYTES.bytes_to_str(data_bytes)
+    s = AESLIB.BYTES.bytes_to_str(data_bytes)
     hhex = md5(s)
-    return AESLIB.BYTES.from_hex(hhex)  // 16 bytes
+    return AESLIB.BYTES.from_hex(hhex)
 end function
 
 AESLIB.HASH.block_size = 64
 
 // HMAC-MD5(key, msg) -> 16-byte tag
 AESLIB.BYTES.hmac_md5 = function(key, msg)
-    if key == null then 
-        key = [] 
+    if key == null then
+        key = []
     end if
-    if msg == null then 
-        msg = [] 
+    if msg == null then
+        msg = []
     end if
     block_size = 64
-
-    // copy key
     k = []
     i = 0
     while i < len(key)
         k.push(key[i])
         i = i + 1
     end while
-
-    // if key longer than block: hash it
     if len(k) > block_size then
         k = AESLIB.HASH.md5_bytes(k)
     end if
-
-    // right-pad key with zeros to block_size
     i = len(k)
     while i < block_size
         k.push(0)
         i = i + 1
     end while
-
-    // pads: 0x36=54, 0x5c=92
     ipad = []
     opad = []
     i = 0
@@ -485,16 +473,12 @@ AESLIB.BYTES.hmac_md5 = function(key, msg)
         opad.push(92)
         i = i + 1
     end while
-
-    // xor pads with key
     i = 0
     while i < block_size
         ipad[i] = ipad[i] ^ k[i]
         opad[i] = opad[i] ^ k[i]
         i = i + 1
     end while
-
-    // inner = MD5(ipad || msg)
     inner = []
     i = 0
     while i < block_size
@@ -507,8 +491,6 @@ AESLIB.BYTES.hmac_md5 = function(key, msg)
         i = i + 1
     end while
     ih = AESLIB.HASH.md5_bytes(inner)
-
-    // outer = MD5(opad || ih)
     outer = []
     i = 0
     while i < block_size
@@ -520,37 +502,33 @@ AESLIB.BYTES.hmac_md5 = function(key, msg)
         outer.push(ih[i])
         i = i + 1
     end while
-
     return AESLIB.HASH.md5_bytes(outer)
 end function
 
 // -------------------- KEYS: load-or-create MAC key --------------------
 AESLIB.KEYS.load_or_create_mac_key = function()
     comp = get_shell.host_computer
-
-    // ensure base folder exists
     base = AESLIB.PATHS.base
-    if not comp.File(base) then 
-        comp.create_folder(parent_path(base), base.remove(parent_path(base)+"/")) 
+    if not comp.File(base) then
+        comp.create_folder(parent_path(base), base.remove(parent_path(base) + "/"))
     end if
-
-    // split path into dir + filename
     full = AESLIB.PATHS.mac_key_path
-    dir  = parent_path(full)
+    dir = parent_path(full)
     name = full.remove(dir + "/")
-
-    // if already exists and valid, use it
     f = comp.File(full)
     if f then
-        hex = f.content   // docs use .content
-        b = AESLIB.BYTES.from_hex(hex)
-        if b != null and len(b) == 32 then 
-            return b 
+        hexv = f.content
+        if hexv == null then
+            hexv = f.get_content
+        end if
+        b = AESLIB.BYTES.from_hex(hexv)
+        if b != null then
+            if len(b) == 32 then
+                return b
+            end if
         end if
     end if
-
-    // create empty file, then write a fresh key
-    comp.touch(dir, name)    // correct arity per docs
+    comp.touch(dir, name)
     key = AESLIB.BYTES.random_bytes(32)
     comp.File(full).set_content(AESLIB.BYTES.to_hex(key))
     return key
@@ -559,23 +537,29 @@ end function
 // -------------------- KEYS: rotate MAC key (with optional backup) --------------------
 AESLIB.KEYS.rotate_mac_key = function(backup_opt)
     comp = get_shell.host_computer
-
-    // ensure current + backup exist
-    cur  = AESLIB.PATHS.mac_key_path
+    cur = AESLIB.PATHS.mac_key_path
     bakp = AESLIB.PATHS.mac_key_backup
-    curd = parent_path(cur);  curn = cur.remove(curd + "/")
-    bakd = parent_path(bakp); bakn = bakp.remove(bakd + "/")
+    curd = parent_path(cur)
+    curn = cur.remove(curd + "/")
+    bakd = parent_path(bakp)
+    bakn = bakp.remove(bakd + "/")
     comp.touch(curd, curn)
     comp.touch(bakd, bakn)
-
     if backup_opt != 0 then
         curf = comp.File(cur)
         bakf = comp.File(bakp)
-        if curf and bakf then 
-            bakf.set_content(curf.content) 
+        if curf != null then
+            if bakf != null then
+                cur_hex = curf.content
+                if cur_hex == null then
+                    cur_hex = curf.get_content
+                end if
+                if cur_hex != null then
+                    bakf.set_content(cur_hex)
+                end if
+            end if
         end if
     end if
-
     new_key = AESLIB.BYTES.random_bytes(32)
     comp.File(cur).set_content(AESLIB.BYTES.to_hex(new_key))
     return new_key
@@ -585,8 +569,8 @@ end function
 AESLIB.MODES.pkcs7_pad = function(bytes, block)
     rem = len(bytes) % block
     pad = block - rem
-    if pad == 0 then 
-        pad = block 
+    if pad == 0 then
+        pad = block
     end if
     out = []
     append_inplace(out, bytes)
@@ -602,23 +586,24 @@ AESLIB.MODES.pkcs7_unpad = function(bytes, block)
     if len(bytes) == 0 then
         return []
     end if
-    pad = bytes[len(bytes)-1]
+    pad = bytes[len(bytes) - 1]
     if typeof(pad) != "number" then
         return []
     end if
-    if pad <= 0 or pad > block then
-        // bad pad: return original (or empty)
+    if pad <= 0 then
         return []
     end if
-    // check pad consistency
+    if pad > block then
+        return []
+    end if
     i = 0
     while i < pad
-        if bytes[len(bytes)-1 - i] != pad then
+        if bytes[len(bytes) - 1 - i] != pad then
             return []
         end if
         i = i + 1
     end while
-    return slice_list(bytes, 0, len(bytes)-pad)
+    return slice_list(bytes, 0, len(bytes) - pad)
 end function
 
 // -------------------- AES-256 CORE --------------------
@@ -627,11 +612,11 @@ A.s_box = null
 A.inv_s_box = null
 A.sboxes_ready = 0
 
-// GF helpers (decimal only; no hex literals)
+// GF helpers (decimal only, no hex literals)
 A.xtime = function(a)
     a2 = bitwise("&", bitwise("<<", a, 1), 255)
     if bitwise("&", a, 128) != 0 then
-        a2 = bitwise("^", a2, 27) // 0x1B
+        a2 = bitwise("^", a2, 27)
     end if
     return a2
 end function
@@ -645,8 +630,8 @@ A.gmul = function(a, b)
         end if
         hi = bitwise("&", a, 128)
         a = bitwise("&", bitwise("<<", a, 1), 255)
-        if hi != 0 then 
-            a = bitwise("^", a, 27) 
+        if hi != 0 then
+            a = bitwise("^", a, 27)
         end if
         b = bitwise(">>", b, 1)
         i = i + 1
@@ -659,55 +644,40 @@ A.init_sboxes = function()
     if A.sboxes_ready == 1 then
         return
     end if
-
-    // 8-bit rotate-left
     rol8 = function(x, n)
         left = bitwise("&", bitwise("<<", x, n), 255)
         right = bitwise(">>", x, 8 - n)
         return bitwise("^", left, right)
     end function
-
-    s = []; inv = []
+    s = []
+    inv = []
     i = 0
     while i < 256
-        s.push(0); inv.push(0)
+        s.push(0)
+        inv.push(0)
         i = i + 1
     end while
-
     p = 1
     q = 1
     while true
-        // p = p * 3  (i.e., p ^= xtime(p))
         p = bitwise("^", p, A.xtime(p))
-
-        // q = q / 3 == q * 0xF6 (246)
         q = A.gmul(q, 246)
-
-        // affine transform on multiplicative inverse q
-        xformed = bitwise("^",
-                    bitwise("^",
-                    bitwise("^",
-                    bitwise("^",
-                        q,
-                        rol8(q, 1)),
-                        rol8(q, 2)),
-                        rol8(q, 3)),
-                        rol8(q, 4))
-        xformed = bitwise("^", xformed, 99) // 0x63
-
+        xformed = bitwise("^", q, rol8(q, 1))
+        xformed = bitwise("^", xformed, rol8(q, 2))
+        xformed = bitwise("^", xformed, rol8(q, 3))
+        xformed = bitwise("^", xformed, rol8(q, 4))
+        xformed = bitwise("^", xformed, 99)
         s[p] = xformed
-        if p == 1 then 
-            break 
+        if p == 1 then
+            break
         end if
     end while
     s[0] = 99
-
     i = 0
     while i < 256
         inv[s[i]] = i
         i = i + 1
     end while
-
     A.s_box = s
     A.inv_s_box = inv
     A.sboxes_ready = 1
@@ -733,32 +703,60 @@ A.inv_sub_bytes = function(st)
 end function
 
 A.shift_rows = function(st)
-    // row1 left rotate 1
-    t = st[1]; st[1]=st[5]; st[5]=st[9]; st[9]=st[13]; st[13]=t
-    // row2 left rotate 2
-    t0 = st[2]; t1 = st[6]; st[2]=st[10]; st[6]=st[14]; st[10]=t0; st[14]=t1
-    // row3 left rotate 3 (right rotate 1)
-    t = st[15]; st[15]=st[11]; st[11]=st[7]; st[7]=st[3]; st[3]=t
+    t = st[1]
+    st[1] = st[5]
+    st[5] = st[9]
+    st[9] = st[13]
+    st[13] = t
+    t0 = st[2]
+    t1 = st[6]
+    st[2] = st[10]
+    st[6] = st[14]
+    st[10] = t0
+    st[14] = t1
+    t = st[15]
+    st[15] = st[11]
+    st[11] = st[7]
+    st[7] = st[3]
+    st[3] = t
     return st
 end function
 
 A.inv_shift_rows = function(st)
-    // inverse of above
-    t = st[13]; st[13]=st[9]; st[9]=st[5]; st[5]=st[1]; st[1]=t
-    t0 = st[10]; t1 = st[14]; st[10]=st[2]; st[14]=st[6]; st[2]=t0; st[6]=t1
-    t = st[3]; st[3]=st[7]; st[7]=st[11]; st[11]=st[15]; st[15]=t
+    t = st[13]
+    st[13] = st[9]
+    st[9] = st[5]
+    st[5] = st[1]
+    st[1] = t
+    t0 = st[10]
+    t1 = st[14]
+    st[10] = st[2]
+    st[14] = st[6]
+    st[2] = t0
+    st[6] = t1
+    t = st[3]
+    st[3] = st[7]
+    st[7] = st[11]
+    st[11] = st[15]
+    st[15] = t
     return st
 end function
 
 A.mix_columns = function(st)
     c = 0
     while c < 4
-        i0 = 4*c+0; i1 = 4*c+1; i2 = 4*c+2; i3 = 4*c+3
-        a0 = st[i0]; a1 = st[i1]; a2 = st[i2]; a3 = st[i3]
-        st[i0] = bitwise("^", bitwise("^", A.gmul(a0,2), A.gmul(a1,3)), bitwise("^", a2, a3))
-        st[i1] = bitwise("^", bitwise("^", a0, A.gmul(a1,2)), bitwise("^", A.gmul(a2,3), a3))
-        st[i2] = bitwise("^", bitwise("^", a0, a1), bitwise("^", A.gmul(a2,2), A.gmul(a3,3)))
-        st[i3] = bitwise("^", bitwise("^", A.gmul(a0,3), a1), bitwise("^", a2, A.gmul(a3,2)))
+        i0 = 4*c + 0
+        i1 = 4*c + 1
+        i2 = 4*c + 2
+        i3 = 4*c + 3
+        a0 = st[i0]
+        a1 = st[i1]
+        a2 = st[i2]
+        a3 = st[i3]
+        st[i0] = bitwise("^", bitwise("^", A.gmul(a0, 2), A.gmul(a1, 3)), bitwise("^", a2, a3))
+        st[i1] = bitwise("^", bitwise("^", a0, A.gmul(a1, 2)), bitwise("^", A.gmul(a2, 3), a3))
+        st[i2] = bitwise("^", bitwise("^", a0, a1), bitwise("^", A.gmul(a2, 2), A.gmul(a3, 3)))
+        st[i3] = bitwise("^", bitwise("^", A.gmul(a0, 3), a1), bitwise("^", a2, A.gmul(a3, 2)))
         c = c + 1
     end while
     return st
@@ -767,12 +765,18 @@ end function
 A.inv_mix_columns = function(st)
     c = 0
     while c < 4
-        i0 = 4*c+0; i1 = 4*c+1; i2 = 4*c+2; i3 = 4*c+3
-        a0 = st[i0]; a1 = st[i1]; a2 = st[i2]; a3 = st[i3]
-        st[i0] = bitwise("^", bitwise("^", A.gmul(a0,14), A.gmul(a1,11)), bitwise("^", A.gmul(a2,13), A.gmul(a3,9)))
-        st[i1] = bitwise("^", bitwise("^", A.gmul(a0,9),  A.gmul(a1,14)), bitwise("^", A.gmul(a2,11), A.gmul(a3,13)))
-        st[i2] = bitwise("^", bitwise("^", A.gmul(a0,13), A.gmul(a1,9)),  bitwise("^", A.gmul(a2,14), A.gmul(a3,11)))
-        st[i3] = bitwise("^", bitwise("^", A.gmul(a0,11), A.gmul(a1,13)), bitwise("^", A.gmul(a2,9),  A.gmul(a3,14)))
+        i0 = 4*c + 0
+        i1 = 4*c + 1
+        i2 = 4*c + 2
+        i3 = 4*c + 3
+        a0 = st[i0]
+        a1 = st[i1]
+        a2 = st[i2]
+        a3 = st[i3]
+        st[i0] = bitwise("^", bitwise("^", A.gmul(a0, 14), A.gmul(a1, 11)), bitwise("^", A.gmul(a2, 13), A.gmul(a3, 9)))
+        st[i1] = bitwise("^", bitwise("^", A.gmul(a0, 9), A.gmul(a1, 14)), bitwise("^", A.gmul(a2, 11), A.gmul(a3, 13)))
+        st[i2] = bitwise("^", bitwise("^", A.gmul(a0, 13), A.gmul(a1, 9)), bitwise("^", A.gmul(a2, 14), A.gmul(a3, 11)))
+        st[i3] = bitwise("^", bitwise("^", A.gmul(a0, 11), A.gmul(a1, 13)), bitwise("^", A.gmul(a2, 9), A.gmul(a3, 14)))
         c = c + 1
     end while
     return st
@@ -790,7 +794,7 @@ end function
 // Rcon (first 15) decimal
 A.rcon = [1,2,4,8,16,32,64,128,27,54,108,216,171,77,154]
 
-A.rot_word = function(w) // [b0,b1,b2,b3]
+A.rot_word = function(w)
     return [w[1], w[2], w[3], w[0]]
 end function
 
@@ -805,37 +809,30 @@ A.key_expansion_256 = function(key32)
     if A.sboxes_ready != 1 then
         A.init_sboxes()
     end if
-    
-    // W: 60 words (4 bytes each)
     W = []
     i = 0
     while i < 8
-        W.push([key32[4*i+0], key32[4*i+1], key32[4*i+2], key32[4*i+3]])
+        W.push([key32[4*i + 0], key32[4*i + 1], key32[4*i + 2], key32[4*i + 3]])
         i = i + 1
     end while
-
     i = 8
     rci = 0
     while i < 60
-        temp = W[i-1][0:]
+        wprev = W[i - 1]
+        temp = slice_list(wprev, 0, len(wprev))
         if i % 8 == 0 then
             temp = A.sub_word(A.rot_word(temp))
             temp[0] = bitwise("^", temp[0], A.rcon[rci])
             rci = rci + 1
         else
             if i % 8 == 4 then
-            temp = A.sub_word(temp)
+                temp = A.sub_word(temp)
             end if
         end if
-        wp = W[i-8]
-        W.push([ bitwise("^", wp[0], temp[0]),
-                 bitwise("^", wp[1], temp[1]),
-                 bitwise("^", wp[2], temp[2]),
-                 bitwise("^", wp[3], temp[3]) ])
+        wp = W[i - 8]
+        W.push([bitwise("^", wp[0], temp[0]), bitwise("^", wp[1], temp[1]), bitwise("^", wp[2], temp[2]), bitwise("^", wp[3], temp[3])])
         i = i + 1
     end while
-
-    // flatten 60*4 = 240 bytes
     out = []
     i = 0
     while i < len(W)
@@ -846,30 +843,26 @@ A.key_expansion_256 = function(key32)
 end function
 
 A.encrypt_block = function(pt16, key32)
-    if len(pt16) != 16 or len(key32) != 32 then 
-        return null 
+    if len(pt16) != 16 then
+        return null
+    end if
+    if len(key32) != 32 then
+        return null
     end if
     if A.sboxes_ready != 1 then
         A.init_sboxes()
     end if
-
     rk = A.key_expansion_256(key32)
-    st = pt16[0:]
-
-    // round 0
+    st = slice_list(pt16, 0, len(pt16))
     st = A.add_round_key(st, slice_list(rk, 0, 16))
-
-    // rounds 1..13
     r = 1
     while r <= 13
         st = A.sub_bytes(st)
         st = A.shift_rows(st)
         st = A.mix_columns(st)
-        st = A.add_round_key(st, slice_list(rk, 16*r, 16*(r+1)))
+        st = A.add_round_key(st, slice_list(rk, 16 * r, 16 * (r + 1)))
         r = r + 1
     end while
-
-    // final (no MixColumns)
     st = A.sub_bytes(st)
     st = A.shift_rows(st)
     st = A.add_round_key(st, slice_list(rk, 224, 240))
@@ -877,32 +870,28 @@ A.encrypt_block = function(pt16, key32)
 end function
 
 A.decrypt_block = function(ct16, key32)
-    if len(ct16) != 16 or len(key32) != 32 then 
-        return null 
+    if len(ct16) != 16 then
+        return null
+    end if
+    if len(key32) != 32 then
+        return null
     end if
     if A.sboxes_ready != 1 then
         A.init_sboxes()
     end if
-
     rk = A.key_expansion_256(key32)
-    st = ct16[0:]
-
-    // inverse final
+    st = slice_list(ct16, 0, len(ct16))
     st = A.add_round_key(st, slice_list(rk, 224, 240))
     st = A.inv_shift_rows(st)
     st = A.inv_sub_bytes(st)
-
-    // rounds 13..1
     r = 13
     while r >= 1
-        st = A.add_round_key(st, slice_list(rk, 16*r, 16*(r+1)))
+        st = A.add_round_key(st, slice_list(rk, 16 * r, 16 * (r + 1)))
         st = A.inv_mix_columns(st)
         st = A.inv_shift_rows(st)
         st = A.inv_sub_bytes(st)
         r = r - 1
     end while
-
-    // round 0
     st = A.add_round_key(st, slice_list(rk, 0, 16))
     return st
 end function
@@ -921,16 +910,15 @@ M.xor_block = function(a, b)
 end function
 
 M.cbc_encrypt = function(plain_bytes, key32, iv16)
-    if len(iv16) != 16 then 
-        return [] 
+    if len(iv16) != 16 then
+        return []
     end if
-    // PKCS#7 pad
     data = AESLIB.MODES.pkcs7_pad(plain_bytes, 16)
     out = []
-    prev = iv16[0:]
+    prev = slice_list(iv16, 0, len(iv16))
     i = 0
     while i < len(data)
-        blk = slice_list(data, i, i+16)
+        blk = slice_list(data, i, i + 16)
         x = M.xor_block(blk, prev)
         c = A.encrypt_block(x, key32)
         append_inplace(out, c)
@@ -941,21 +929,20 @@ M.cbc_encrypt = function(plain_bytes, key32, iv16)
 end function
 
 M.cbc_decrypt = function(cipher_bytes, key32, iv16)
-    if len(iv16) != 16 then 
-        return [] 
+    if len(iv16) != 16 then
+        return []
     end if
     out = []
-    prev = iv16[0:]
+    prev = slice_list(iv16, 0, len(iv16))
     i = 0
     while i < len(cipher_bytes)
-        cblk = slice_list(cipher_bytes, i, i+16)
+        cblk = slice_list(cipher_bytes, i, i + 16)
         x = A.decrypt_block(cblk, key32)
         pblk = M.xor_block(x, prev)
         append_inplace(out, pblk)
         prev = cblk
         i = i + 16
     end while
-    // unpad
     return AESLIB.MODES.pkcs7_unpad(out, 16)
 end function
 
@@ -968,27 +955,21 @@ AESLIB.MODES.seal_cbc_hmac_md5 = function(plain_bytes, key32_enc, key_mac, iv16_
     if len(iv) != 16 then
         return []
     end if
-
     ct = AESLIB.MODES.cbc_encrypt(plain_bytes, key32_enc, iv)
-
-    // m = iv || ct
     m = []
     AESLIB.BYTES.append_all(m, iv)
     AESLIB.BYTES.append_all(m, ct)
-    
     tag_full = AESLIB.BYTES.hmac_md5(key_mac, m)
-
     tlen = tag_len_opt
-    if tlen == null then 
-        tlen = 16 
-    end if      // MD5 = 16
-    if tlen < 10 then 
-        tlen = 10 
-    end if          // minimum sane tag length
-    if tlen > len(tag_full) then 
-        tlen = len(tag_full) 
+    if tlen == null then
+        tlen = 16
     end if
-
+    if tlen < 10 then
+        tlen = 10
+    end if
+    if tlen > len(tag_full) then
+        tlen = len(tag_full)
+    end if
     out = []
     AESLIB.BYTES.append_all(out, iv)
     AESLIB.BYTES.append_all(out, ct)
@@ -997,32 +978,28 @@ AESLIB.MODES.seal_cbc_hmac_md5 = function(plain_bytes, key32_enc, key_mac, iv16_
 end function
 
 AESLIB.MODES.open_cbc_hmac_md5 = function(sealed_bytes, key32_enc, key_mac, tag_len_opt)
-    if sealed_bytes == null then 
-        return [] 
+    if sealed_bytes == null then
+        return []
     end if
-    if len(sealed_bytes) < 42 then 
-        return [] 
-    end if   // 16 iv + 16 ct + 10 min tag
-
+    if len(sealed_bytes) < 42 then
+        return []
+    end if
     tlen = tag_len_opt
-    if tlen == null then 
-        tlen = 16 
+    if tlen == null then
+        tlen = 16
     end if
-    if tlen < 10 then 
-        tlen = 10 
+    if tlen < 10 then
+        tlen = 10
     end if
-    if tlen > len(sealed_bytes) - 16 then 
-        return [] 
+    if tlen > len(sealed_bytes) - 16 then
+        return []
     end if
-
-    // split iv, ct, tag
     iv = []
     i = 0
     while i < 16
         iv.push(sealed_bytes[i])
         i = i + 1
     end while
-
     end_ct = len(sealed_bytes) - tlen
     ct = []
     i = 16
@@ -1030,28 +1007,21 @@ AESLIB.MODES.open_cbc_hmac_md5 = function(sealed_bytes, key32_enc, key_mac, tag_
         ct.push(sealed_bytes[i])
         i = i + 1
     end while
-
     tag = []
     i = end_ct
     while i < len(sealed_bytes)
         tag.push(sealed_bytes[i])
         i = i + 1
     end while
-
-    if (len(ct) % 16) != 0 then 
-        return [] 
+    if (len(ct) % 16) != 0 then
+        return []
     end if
-
-    // recompute tag on iv||ct
     m = []
     AESLIB.BYTES.append_all(m, iv)
     AESLIB.BYTES.append_all(m, ct)
-
     tag2 = AESLIB.BYTES.hmac_md5(key_mac, m)
-
-    // constant-time-ish compare
-    if len(tag) != tlen then 
-        return [] 
+    if len(tag) != tlen then
+        return []
     end if
     diff = 0
     i = 0
@@ -1059,11 +1029,9 @@ AESLIB.MODES.open_cbc_hmac_md5 = function(sealed_bytes, key32_enc, key_mac, tag_
         diff = bitwise("|", diff, bitwise("^", tag[i], tag2[i]))
         i = i + 1
     end while
-    if diff != 0 then 
-        return [] 
+    if diff != 0 then
+        return []
     end if
-
-    // decrypt on success
     return AESLIB.MODES.cbc_decrypt(ct, key32_enc, iv)
 end function
 
@@ -1077,12 +1045,10 @@ AESLIB.MODES.seal_cbc = function(plain_bytes, key32, iv16_opt)
         iv = AESLIB.BYTES.random_bytes(16)
     end if
     if len(iv) != 16 then
-        return [] // invalid IV
+        return []
     end if
-
     ct = AESLIB.MODES.cbc_encrypt(plain_bytes, key32, iv)
-    // concat iv || ct
-    out = iv[0:] // copy
+    out = slice_list(iv, 0, len(iv))
     append_inplace(out, ct)
     return out
 end function
@@ -1093,101 +1059,207 @@ AESLIB.MODES.open_cbc = function(sealed_bytes, key32)
         return []
     end if
     if len(sealed_bytes) < 32 then
-        // need at least 16 IV + 16 CT
         return []
     end if
     if (len(sealed_bytes) - 16) % 16 != 0 then
-        // ciphertext must be a multiple of 16
         return []
     end if
-
-    iv  = slice_list(sealed_bytes, 0, 16)
-    ct  = slice_list(sealed_bytes, 16, len(sealed_bytes))
-    pt  = AESLIB.MODES.cbc_decrypt(ct, key32, iv) // includes PKCS#7 unpad
+    iv = slice_list(sealed_bytes, 0, 16)
+    ct = slice_list(sealed_bytes, 16, len(sealed_bytes))
+    pt = AESLIB.MODES.cbc_decrypt(ct, key32, iv)
     return pt
 end function
 
+// ---- CTR DEBUG FLAG ----
+AESLIB.DEBUG_CTR = 0
+
 // CTR keystream: nonce||counter (16 bytes)
-// We’ll treat bytes 12..15 as a uint32 coAunter.
-M.ctr_xcrypt = function(bytes, key32, nonce16)
-    if len(nonce16) != 16 then 
-        return [] 
+// We’ll treat bytes 12..15 as a uint32 counter.
+M.ctr_xcrypt = function(data_bytes, key32, nonce16)
+    if AESLIB.DEBUG_CTR != 0 then
+        print("[CTR] ctr_xcrypt start")
+        print("[CTR] data_len=" + str(len(data_bytes)))
+        print("[CTR] key_len=" + str(len(key32)))
+        print("[CTR] nonce_len=" + str(len(nonce16)))
     end if
+
+    if len(nonce16) != 16 then
+        if AESLIB.DEBUG_CTR != 0 then
+            print("[CTR] bad nonce length")
+        end if
+        return []
+    end if
+
     out = []
     counter = 0
     i = 0
-    while i < len(bytes)
-        // build counter block
-        block = nonce16[0:]
+    while i < len(data_bytes)
+        block = slice_list(nonce16, 0, len(nonce16))
+
         c0 = bitwise("&", counter, 255)
         c1 = bitwise("&", bitwise(">>", counter, 8), 255)
         c2 = bitwise("&", bitwise(">>", counter, 16), 255)
         c3 = bitwise("&", bitwise(">>", counter, 24), 255)
-        block[12] = c3; block[13] = c2; block[14] = c1; block[15] = c0  // big-endian
+
+        block[12] = c3
+        block[13] = c2
+        block[14] = c1
+        block[15] = c0
+
+        if AESLIB.DEBUG_CTR != 0 then
+            if counter < 2 then
+                print("[CTR] block#" + str(counter) + " ctr=" + str(counter))
+                print("[CTR] block bytes set at [12..15] = " + str(c3) + "," + str(c2) + "," + str(c1) + "," + str(c0))
+            end if
+        end if
 
         ks = A.encrypt_block(block, key32)
+
         j = 0
-        while j < 16 and (i + j) < len(bytes)
-            out.push(bitwise("^", bytes[i+j], ks[j]))
+        while j < 16
+            if (i + j) >= len(data_bytes) then
+                break
+            end if
+            out.push(bitwise("^", data_bytes[i + j], ks[j]))
             j = j + 1
         end while
 
         counter = (counter + 1) % 4294967296
         i = i + 16
     end while
+
+    if AESLIB.DEBUG_CTR != 0 then
+        print("[CTR] ctr_xcrypt done, out_len=" + str(len(out)))
+    end if
+
     return out
 end function
 
 // Stable 3-arg wrappers (public API)
+// IMPORTANT: define BOTH as explicit 3-arg wrappers (no aliasing)
 AESLIB.MODES.ctr_encrypt = function(data, key32, nonce16)
-  return AESLIB.MODES.ctr_xcrypt(data, key32, nonce16)
-end function
-AESLIB.MODES.ctr_decrypt = AESLIB.MODES.ctr_encrypt
-
-// Accept either a hex string or a bytes list; fall back to raw text → bytes
-AESLIB._maybe_hex_to_bytes = function(maybe)
-    if typeof(maybe) == "string" then
-        b = AESLIB.BYTES.from_hex(maybe)
-        if len(b) > 0 then 
-            return b 
-        end if
-        // not valid hex (or empty) → interpret as raw text
-        return AESLIB.BYTES.str_to_bytes(maybe)
+    if AESLIB.DEBUG_CTR != 0 then
+        print("[CTR] ctr_encrypt called")
     end if
-    return maybe  // already a list (bytes), passthrough
+    return AESLIB.MODES.ctr_xcrypt(data, key32, nonce16)
+end function
+
+AESLIB.MODES.ctr_decrypt = function(data, key32, nonce16)
+    if AESLIB.DEBUG_CTR != 0 then
+        print("[CTR] ctr_decrypt called")
+    end if
+    return AESLIB.MODES.ctr_xcrypt(data, key32, nonce16)
+end function
+
+// Sealed CTR: returns nonce16 || ciphertext
+AESLIB.MODES.seal_ctr = function(plain_bytes, key32, nonce16_opt)
+    nonce = nonce16_opt
+    if nonce == null then
+        nonce = AESLIB.BYTES.random_bytes(16)
+    end if
+    if len(nonce) != 16 then
+        return []
+    end if
+    ct = AESLIB.MODES.ctr_xcrypt(plain_bytes, key32, nonce)
+    out = []
+    append_inplace(out, nonce)
+    append_inplace(out, ct)
+    return out
+end function
+
+// Open sealed CTR input (expects nonce16 || ciphertext)
+AESLIB.MODES.open_ctr = function(sealed_bytes, key32)
+    if sealed_bytes == null then
+        return []
+    end if
+    if len(sealed_bytes) < 16 then
+        return []
+    end if
+    nonce = slice_list(sealed_bytes, 0, 16)
+    ct = slice_list(sealed_bytes, 16, len(sealed_bytes))
+    pt = AESLIB.MODES.ctr_xcrypt(ct, key32, nonce)
+    return pt
+end function
+
+// Text helpers for sealed CTR
+AESLIB.encrypt_text_ctr_sealed = function(text, password, as_hex_opt)
+    key32 = AESLIB.BYTES.key32_from_password(password)
+    pt = AESLIB.BYTES.str_to_bytes(text)
+    sealed = AESLIB.MODES.seal_ctr(pt, key32, null)
+    if as_hex_opt == 0 then
+        return sealed
+    end if
+    return AESLIB.BYTES.to_hex(sealed)
+end function
+
+AESLIB.decrypt_text_ctr_sealed = function(sealed_in, password)
+    key32 = AESLIB.BYTES.key32_from_password(password)
+    sealed = null
+    if typeof(sealed_in) == "string" then
+        tmp = AESLIB.BYTES.from_hex(sealed_in)
+        if len(tmp) > 0 then
+            sealed = tmp
+        else
+            sealed = AESLIB.BYTES.str_to_bytes(sealed_in)
+        end if
+    else
+        sealed = sealed_in
+    end if
+    pt = AESLIB.MODES.open_ctr(sealed, key32)
+    return AESLIB.BYTES.bytes_to_str(pt)
 end function
 
 // -------------------- Friendly text wrappers --------------------
 // CBC: returns hex string by default (easy to store)
 AESLIB.encrypt_text_cbc = function(text, password, iv16, as_hex_opt)
     key32 = AESLIB.BYTES.key32_from_password(password)
-    pt    = AESLIB.BYTES.str_to_bytes(text)
-    ct    = AESLIB.MODES.cbc_encrypt(pt, key32, iv16)
-    if as_hex_opt == 0 then 
-        return ct 
+    pt = AESLIB.BYTES.str_to_bytes(text)
+    ct = AESLIB.MODES.cbc_encrypt(pt, key32, iv16)
+    if as_hex_opt == 0 then
+        return ct
     end if
     return AESLIB.BYTES.to_hex(ct)
 end function
 
 AESLIB.decrypt_text_cbc = function(cipher_in, password, iv16)
     key32 = AESLIB.BYTES.key32_from_password(password)
-    ct    = AESLIB._maybe_hex_to_bytes(cipher_in)
-    pt    = AESLIB.MODES.cbc_decrypt(ct, key32, iv16)
+    ct = null
+    if typeof(cipher_in) == "string" then
+        tmp = AESLIB.BYTES.from_hex(cipher_in)
+        if len(tmp) > 0 then
+            ct = tmp
+        else
+            ct = AESLIB.BYTES.str_to_bytes(cipher_in)
+        end if
+    else
+        ct = cipher_in
+    end if
+    pt = AESLIB.MODES.cbc_decrypt(ct, key32, iv16)
     return AESLIB.BYTES.bytes_to_str(pt)
 end function
 
 // CTR: returns hex string by default (no padding used)
 AESLIB.encrypt_text_ctr = function(text, password, nonce16)
     key32 = AESLIB.BYTES.key32_from_password(password)
-    pt    = AESLIB.BYTES.str_to_bytes(text)
-    ct    = AESLIB.MODES.ctr_xcrypt(pt, key32, nonce16)
+    pt = AESLIB.BYTES.str_to_bytes(text)
+    ct = AESLIB.MODES.ctr_xcrypt(pt, key32, nonce16)
     return AESLIB.BYTES.to_hex(ct)
 end function
 
 AESLIB.decrypt_text_ctr = function(cipher_in, password, nonce16)
     key32 = AESLIB.BYTES.key32_from_password(password)
-    ct    = AESLIB._maybe_hex_to_bytes(cipher_in)
-    pt    = AESLIB.MODES.ctr_xcrypt(ct, key32, nonce16)
+    ct = null
+    if typeof(cipher_in) == "string" then
+        tmp = AESLIB.BYTES.from_hex(cipher_in)
+        if len(tmp) > 0 then
+            ct = tmp
+        else
+            ct = AESLIB.BYTES.str_to_bytes(cipher_in)
+        end if
+    else
+        ct = cipher_in
+    end if
+    pt = AESLIB.MODES.ctr_xcrypt(ct, key32, nonce16)
     return AESLIB.BYTES.bytes_to_str(pt)
 end function
 

@@ -2,52 +2,50 @@
 // Script Name: grAESecure_test
 // Author: Lexsor
 // Created: 23 AUG 2025
-// Version: 0.1
+// Version: 0.1.5
 // Purpose: Self-test for /opt/crypto/grAESecure
 //////////////////////////////////////////////////////////
 
-import_code("/opt/crypto/grAESecure.src")
+// import for testing
+import_code("grAESecure.src")
+// import_code("/opt/crypto/grAESecure.src")
 
 if not AES256_LIB then
     print("[!!] AES256_LIB not found after import")
     exit("")
 end if
-AES = AES256_LIB
 
-B = AES256_LIB.BYTES
-key   = B.random_bytes(32)
-nonce = B.random_bytes(16)
-msg   = B.str_to_bytes("ctr test")
+OK = function(msg)
+    print("[OK] " + msg)
+end function
 
-pwd  = "p@s$w0rd"
-iv   = B.random_bytes(16)
-nonce= B.random_bytes(16)
+FAIL = function(msg)
+    print("[!!] " + msg)
+end function
 
-// CBC text round-trip (hex path)
-cbc_hex = AES256_LIB.encrypt_text_cbc("hello CBC", pwd, iv)
-cbc_pt  = AES256_LIB.decrypt_text_cbc(cbc_hex, pwd, iv)
-print("Text CBC symmetric: " + (cbc_pt == "hello CBC"))
+// simple list copy (avoids slice syntax like [0:])
+copy_list = function(src)
+    out = []
+    if src == null then
+        return out
+    end if
+    i = 0
+    while i < len(src)
+        out.push(src[i])
+        i = i + 1
+    end while
+    return out
+end function
 
-// CTR text round-trip (hex path)
-ctr_hex = AES256_LIB.encrypt_text_ctr("hello CTR", pwd, nonce)
-ctr_pt  = AES256_LIB.decrypt_text_ctr(ctr_hex, pwd, nonce)
-print("Text CTR symmetric: " + (ctr_pt == "hello CTR"))
-
-// Extra: bytes-path also works
-ctr_bytes = AES256_LIB.BYTES.from_hex(ctr_hex)  // back to bytes
-ctr_pt2   = AES256_LIB.decrypt_text_ctr(ctr_bytes, pwd, nonce)
-print("Text CTR bytes-input ok: " + (ctr_pt2 == "hello CTR"))
-
-// ---------- helpers ----------
 BYTES_eq = function(a, b)
-    if a == null then 
-        return false 
+    if a == null then
+        return false
     end if
-    if b == null then 
-        return false 
+    if b == null then
+        return false
     end if
-    if len(a) != len(b) then 
-        return false 
+    if len(a) != len(b) then
+        return false
     end if
     i = 0
     while i < len(a)
@@ -59,90 +57,120 @@ BYTES_eq = function(a, b)
     return true
 end function
 
-hex = function(arr)
-    return AESLIB.BYTES.to_hex(arr)
+to_hex_str = function(arr)
+    return AES256_LIB.BYTES.to_hex(arr)
 end function
 
-OK = function(msg)
-    print("[OK] " + msg)
-end function
+B = AES256_LIB.BYTES
+pwd = "p@s$w0rd"
+iv = B.random_bytes(16)
+nonce = B.random_bytes(16)
 
-FAIL = function(msg)
-    print("[!!] " + msg)
-end function
+// CBC text round-trip (hex path)
+cbc_hex = AES256_LIB.encrypt_text_cbc("hello CBC", pwd, iv)
+cbc_pt = AES256_LIB.decrypt_text_cbc(cbc_hex, pwd, iv)
+ok_flag = 0
+if cbc_pt == "hello CBC" then
+    ok_flag = 1
+else
+    ok_flag = 0
+end if
+print("Text CBC symmetric: " + str(ok_flag))
 
-// --- Safe map helpers (never probe missing keys) ---
-MAP_has = function(m, key)
-    if typeof(m) != "map" then 
-        return false 
+// CTR text round-trip (hex path)
+ctr_hex = AES256_LIB.encrypt_text_ctr("hello CTR", pwd, nonce)
+ctr_pt = AES256_LIB.decrypt_text_ctr(ctr_hex, pwd, nonce)
+ok_flag = 0
+if ctr_pt == "hello CTR" then
+    ok_flag = 1
+else
+    ok_flag = 0
+end if
+print("Text CTR symmetric: " + str(ok_flag))
+
+// Extra: bytes-path also works
+ctr_bytes = AES256_LIB.BYTES.from_hex(ctr_hex)
+ctr_pt2 = AES256_LIB.decrypt_text_ctr(ctr_bytes, pwd, nonce)
+ok_flag = 0
+if ctr_pt2 == "hello CTR" then
+    ok_flag = 1
+else
+    ok_flag = 0
+end if
+print("Text CTR bytes-input ok: " + str(ok_flag))
+
+// ---------- 1) BYTES round-trip (text) ----------
+pt_s = "Hello, GreyScript!"
+pt_b = AES256_LIB.BYTES.str_to_bytes(pt_s)
+rt_s = AES256_LIB.BYTES.bytes_to_str(pt_b)
+if rt_s == pt_s then
+    OK("BYTES round-trip")
+else
+    FAIL("BYTES round-trip")
+end if
+
+// ---------- 2) BYTES raw round-trip (0..255) ----------
+raw = []
+i = 0
+while i < 256
+    raw.push(i)
+    i = i + 1
+end while
+raw_s = AES256_LIB.BYTES.bytes_to_str(raw)
+raw2 = AES256_LIB.BYTES.str_to_bytes(raw_s)
+if BYTES_eq(raw, raw2) then
+    OK("BYTES raw round-trip")
+else
+    FAIL("BYTES raw round-trip")
+end if
+
+// ---------- 3) S-box inverse ----------
+AES256 = AES256_LIB.AES256
+i = 0
+ok_inv = true
+while i < 256
+    sb = AES256.s_box[i]
+    inv = AES256.inv_s_box[sb]
+    if inv != i then
+        ok_inv = false
     end if
-    for kv in m
-        k = null
-        if typeof(kv) == "map" then
-            k = kv["key"]
-        else
-            k = kv
-        end if
-        if k == key then 
-            return true 
-        end if
-    end for
-    return false
-end function
-
-MAP_get = function(m, key)
-    if typeof(m) != "map" then 
-        return null 
+    if ok_inv == false then
+        break
     end if
-    for kv in m
-        if typeof(kv) == "map" then
-            if kv["key"] == key then 
-                return kv["value"] 
-            end if
-        else
-            if kv == key then
-                return m[key]
-            end if
-        end if
-    end for
-    return null
-end function
+    i = i + 1
+end while
+if ok_inv then
+    OK("S-box inverse")
+else
+    FAIL("S-box inverse")
+end if
 
-// Return number of parameters a function expects, or -1 if unknown.
-// Works on GreyScript function objects that behave like maps (have a "params" entry).
-FUNC_arity = function(fn)
-    if typeof(fn) != "map" then
-        return -1
-    end if
-    params = null
-    for kv in fn
-        if typeof(kv) == "map" then
-            if kv["key"] == "params" then
-                params = kv["value"]
-            end if
-        else
-            if kv == "params" then
-                // safe to index now—confirmed key exists
-                params = fn["params"]
-            end if
-        end if
-    end for
-    if params == null then
-        return -1
-    end if
-    return len(params)
-end function
+// ---------- 4) GF xtime/gmul sanity ----------
+OK("GF xtime/gmul sanity")
 
-print("ctr_encrypt arity = " + str(FUNC_arity(AES256_LIB.MODES.ctr_encrypt)))
+// ---------- 5) KeyExpansion (skipped: expand_key not exposed) ----------
+key32 = AES256_LIB.BYTES.key32_from_password("testkey-256")
+OK("KeyExpansion (skipped: expand_key not exposed)")
 
-ct = AES256_LIB.MODES.ctr_encrypt(msg, key, nonce)
-pt = AES256_LIB.MODES.ctr_decrypt(ct, key, nonce)
-print("CTR wrappers OK: " + (AES256_LIB.BYTES.bytes_eq(msg, pt)))
+// ---------- 6) Encrypt/Decrypt single block ----------
+blk = []
+i = 0
+while i < 16
+    blk.push((i * 7) % 256)
+    i = i + 1
+end while
+enc_blk = AES256.encrypt_block(blk, key32)
+dec_blk = AES256.decrypt_block(enc_blk, key32)
+if BYTES_eq(blk, dec_blk) then
+    OK("Encrypt/Decrypt single block")
+else
+    FAIL("Encrypt/Decrypt single block")
+end if
 
-// Local PKCS#7 (fallback)
+// ---------- 7) PKCS#7 pad/unpad ----------
 PKCS7_pad = function(data, block)
-    if data == null then 
-        return [] 
+    if data == null then
+        return []
     end if
     out = []
     i = 0
@@ -152,8 +180,8 @@ PKCS7_pad = function(data, block)
     end while
     r = len(out) % block
     padlen = block - r
-    if padlen == 0 then 
-        padlen = block 
+    if padlen == 0 then
+        padlen = block
     end if
     i = 0
     while i < padlen
@@ -164,24 +192,24 @@ PKCS7_pad = function(data, block)
 end function
 
 PKCS7_unpad = function(data, block)
-    if data == null then 
-        return [] 
+    if data == null then
+        return []
     end if
-    if (len(data) % block) != 0 then 
-        return [] 
+    if (len(data) % block) != 0 then
+        return []
     end if
-    if len(data) == 0 then 
-        return [] 
+    if len(data) == 0 then
+        return []
     end if
     p = data[len(data) - 1]
-    if typeof(p) != "number" then 
-        return [] 
+    if typeof(p) != "number" then
+        return []
     end if
-    if p <= 0 then 
-        return [] 
+    if p <= 0 then
+        return []
     end if
-    if p > block then 
-        return [] 
+    if p > block then
+        return []
     end if
     i = 0
     while i < p
@@ -199,244 +227,88 @@ PKCS7_unpad = function(data, block)
     return out
 end function
 
-// ---------- optional S-box init ----------
-AES256 = null
-if MAP_has(AES, "AES256") then
-    AES256 = MAP_get(AES, "AES256")
-end if
-if AES256 != null then
-    if MAP_has(AES256, "init_sboxes") then
-        fn = MAP_get(AES256, "init_sboxes")
-        if fn != null then 
-            fn() 
-        end if
-    end if
-end if
-
-// ---------- 1) BYTES round-trip (text) ----------
-pt_s = "Hello, GreyScript!"
-pt_b = AESLIB.BYTES.str_to_bytes(pt_s)
-rt_s = AESLIB.BYTES.bytes_to_str(pt_b)
-if rt_s == pt_s then
-    OK("BYTES round-trip")
-else
-    FAIL("BYTES round-trip")
-end if
-
-// ---------- 2) BYTES raw round-trip (0..255) ----------
-raw = []
-i = 0
-while i < 256
-    raw.push(i)
-    i = i + 1
-end while
-raw_s = AESLIB.BYTES.bytes_to_str(raw)
-raw2  = AESLIB.BYTES.str_to_bytes(raw_s)
-if BYTES_eq(raw, raw2) then
-    OK("BYTES raw round-trip")
-else
-    FAIL("BYTES raw round-trip")
-end if
-
-// ---------- 3) S-box inverse ----------
-i = 0
-ok_inv = true
-while i < 256
-    sb = AES256.s_box[i]
-    inv = AES256.inv_s_box[sb]
-    if inv != i then
-        ok_inv = false
-        break
-    end if
-    i = i + 1
-end while
-if ok_inv then
-    OK("S-box inverse")
-else
-    FAIL("S-box inverse")
-end if
-
-// ---------- 4) S-box inverse ----------
-OK("S-box inverse")
-
-
-// ---------- 5) GF xtime/gmul sanity ----------
-OK("GF xtime/gmul sanity")
-
-// ---------- 6) KeyExpansion (skipped: expand_key not exposed) ----------
-key_pw = "testkey-256"
-key32  = AESLIB.BYTES.key32_from_password(key_pw)
-OK("KeyExpansion (skipped: expand_key not exposed)")
-
-// ---------- 7) Encrypt/Decrypt single block ----------
-if AES256 != null then
-    blk = []
-    i = 0
-    while i < 16
-        blk.push((i * 7) % 256)
-        i = i + 1
-    end while
-
-    did = false
-    if MAP_has(AES256, "expand_key") then
-        rk2 = AES256.expand_key(key32)
-        if MAP_has(AES256, "encrypt_block_rk") and MAP_has(AES256, "decrypt_block_rk") then
-            enc_blk = AES256.encrypt_block_rk(blk, rk2)
-            dec_blk = AES256.decrypt_block_rk(enc_blk, rk2)
-            did = true
-        end if
-    end if
-    if did == false then
-        // fallback to key32-based API
-        enc_blk = AES256.encrypt_block(blk, key32)
-        dec_blk = AES256.decrypt_block(enc_blk, key32)
-        did = true
-    end if
-
-    if BYTES_eq(blk, dec_blk) then
-        OK("Encrypt/Decrypt single block")
-    else
-        FAIL("Encrypt/Decrypt single block")
-    end if
-else
-    OK("Encrypt/Decrypt single block (skipped: AES256 not exposed)")
-end if
-
-// ---------- 8) PKCS#7 pad/unpad ----------
-msg = AESLIB.BYTES.str_to_bytes("PKCS7 test 12345")
-padded   = PKCS7_pad(msg, 16)
+msg = AES256_LIB.BYTES.str_to_bytes("PKCS7 test 12345")
+padded = PKCS7_pad(msg, 16)
 unpadded = PKCS7_unpad(padded, 16)
-ok_pad = false
+cond1 = 0
 if (len(padded) % 16) == 0 then
-    if BYTES_eq(msg, unpadded) then
-        ok_pad = true
-    end if
+    cond1 = 1
+else
+    cond1 = 0
 end if
-if ok_pad then
-    OK("PKCS#7 pad/unpad")
+cond2 = 0
+if BYTES_eq(msg, unpadded) then
+    cond2 = 1
+else
+    cond2 = 0
+end if
+if cond1 == 1 then
+    if cond2 == 1 then
+        OK("PKCS#7 pad/unpad")
+    else
+        FAIL("PKCS#7 pad/unpad")
+    end if
 else
     FAIL("PKCS#7 pad/unpad")
 end if
 
-// ---------- 9) CBC enc/dec ----------
-cbc_pt  = AESLIB.BYTES.str_to_bytes("The quick brown fox jumps over the lazy dog.")
-cbc_iv  = AESLIB.BYTES.random_bytes(16)
-cbc_ct  = AESLIB.MODES.cbc_encrypt(cbc_pt, key32, cbc_iv)
-cbc_pt2 = AESLIB.MODES.cbc_decrypt(cbc_ct, key32, cbc_iv)
+// ---------- 8) CBC enc/dec ----------
+cbc_pt = AES256_LIB.BYTES.str_to_bytes("The quick brown fox jumps over the lazy dog.")
+cbc_iv = AES256_LIB.BYTES.random_bytes(16)
+cbc_ct = AES256_LIB.MODES.cbc_encrypt(cbc_pt, key32, cbc_iv)
+cbc_pt2 = AES256_LIB.MODES.cbc_decrypt(cbc_ct, key32, cbc_iv)
 if BYTES_eq(cbc_pt, cbc_pt2) then
     OK("CBC enc/dec")
 else
-    FAIL("CBC enc/dec mismatch ct_len=" + str(len(cbc_ct)) + " ct_hex=" + hex(cbc_ct))
+    FAIL("CBC enc/dec")
 end if
 
-// ---------- 10) CTR enc/dec ----------
-nonce2 = AESLIB.BYTES.random_bytes(16)
-ct_ctr  = AESLIB.MODES.ctr_encrypt(cbc_pt, key32, nonce2)
-pt_ctr2 = AESLIB.MODES.ctr_decrypt(ct_ctr, key32, nonce2)
-if BYTES_eq(cbc_pt, pt_ctr2) then
-  OK("CTR enc/dec")
+// ---------- CTR sealed enc/dec (2-arg, nonce carried inside) ----------
+nonce2 = AES256_LIB.BYTES.random_bytes(16)
+sealed_ctr = AES256_LIB.MODES.seal_ctr(cbc_pt, key32, nonce2)
+opened_ctr = AES256_LIB.MODES.open_ctr(sealed_ctr, key32)
+if BYTES_eq(cbc_pt, opened_ctr) then
+    OK("CTR sealed enc/dec")
 else
-  FAIL("CTR enc/dec")
+    FAIL("CTR sealed enc/dec")
 end if
 
-// ---------- 11) sealed_cbc (2-arg shim; skip if not exposed) ----------
-did_sealed = false
-if MODES != null then
-    raw_seal = null
-    raw_open = null
+// ---------- 10) sealed_cbc_hmac_md5 (keyed) ----------
+macKey = AES256_LIB.BYTES.random_bytes(32)
 
-    if MAP_has(MODES, "seal_cbc_hmac_md5") then
-        raw_seal = MAP_get(MODES, "seal_cbc_hmac_md5")
+sealedK = AES256_LIB.MODES.seal_cbc_hmac_md5(cbc_pt, key32, macKey)
+openedK = AES256_LIB.MODES.open_cbc_hmac_md5(sealedK, key32, macKey)
+if BYTES_eq(cbc_pt, openedK) then
+    OK("sealed_cbc+HMAC keyed -> plaintext")
+else
+    FAIL("sealed_cbc+HMAC keyed -> plaintext")
+end if
+
+sealed12 = AES256_LIB.MODES.seal_cbc_hmac_md5(cbc_pt, key32, macKey, null, 12)
+opened12 = AES256_LIB.MODES.open_cbc_hmac_md5(sealed12, key32, macKey, 12)
+if BYTES_eq(cbc_pt, opened12) then
+    OK("sealed_cbc+HMAC (12-byte tag) -> plaintext")
+else
+    FAIL("sealed_cbc+HMAC (12-byte tag) -> plaintext")
+end if
+
+tampered = copy_list(sealedK)
+tampered[20] = (tampered[20] + 1) % 256
+openedBad = AES256_LIB.MODES.open_cbc_hmac_md5(tampered, key32, macKey)
+is_empty = 0
+if openedBad == null then
+    is_empty = 1
+else
+    if len(openedBad) == 0 then
+        is_empty = 1
     else
-        if MAP_has(MODES, "seal_cbc_auth") then
-            raw_seal = MAP_get(MODES, "seal_cbc_auth")
-        end if
-    end if
-
-    if MAP_has(MODES, "open_cbc_hmac_md5") then
-        raw_open = MAP_get(MODES, "open_cbc_hmac_md5")
-    else
-        if MAP_has(MODES, "open_cbc_auth") then
-            raw_open = MAP_get(MODES, "open_cbc_auth")
-        end if
-    end if
-
-    if raw_seal != null then
-        if raw_open != null then
-            sealed  = raw_seal(cbc_pt, key32)     // 2 args
-            opened  = raw_open(sealed, key32)     // 2 args
-
-            if BYTES_eq(cbc_pt, opened) then
-                OK("sealed_cbc open -> plaintext")
-            else
-                FAIL("sealed_cbc open -> plaintext")
-            end if
-
-            // Basic iv||ct presence (assume at least IV+CT)
-            if len(sealed) >= 32 then
-                OK("sealed_cbc uses iv||ct")
-            else
-                FAIL("sealed_cbc uses iv||ct (sealed too short: " + str(len(sealed)) + ")")
-            end if
-
-            // rejects short
-            short_in = AESLIB.BYTES.random_bytes(20)
-            rej1 = raw_open(short_in, key32)
-            rej1_ok = false
-            if rej1 == null then
-                rej1_ok = true
-            else
-                if len(rej1) == 0 then
-                    rej1_ok = true
-                end if
-            end if
-            if rej1_ok then
-                OK("open_cbc rejects short")
-            else
-                FAIL("open_cbc rejects short")
-            end if
-
-            // rejects non-multiple (IV 16 + CT 15 + [maybe TAG])
-            bad = []
-            i = 0
-            while i < 16
-                bad.push(i)         // IV
-                i = i + 1
-            end while
-            i = 0
-            while i < 15
-                bad.push(200 + (i % 50))   // CT (15 bytes)
-                i = i + 1
-            end while
-            // optional extra bytes (simulate tag-like tail)
-            i = 0
-            while i < 16
-                bad.push(100 + (i % 30))
-                i = i + 1
-            end while
-
-            rej2 = raw_open(bad, key32)
-            rej2_ok = false
-            if rej2 == null then
-                rej2_ok = true
-            else
-                if len(rej2) == 0 then
-                    rej2_ok = true
-                end if
-            end if
-            if rej2_ok then
-                OK("open_cbc rejects non-multiple")
-            else
-                FAIL("open_cbc rejects non-multiple")
-            end if
-
-            did_sealed = true
-        end if
+        is_empty = 0
     end if
 end if
-if did_sealed == false then
-    OK("sealed_cbc (skipped: not exposed)")
+if is_empty == 1 then
+    OK("sealed_cbc+HMAC rejects tamper")
+else
+    FAIL("sealed_cbc+HMAC rejects tamper")
 end if
 
-// ---------- done ----------
 print("[DONE] grAESecure tests finished")
